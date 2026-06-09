@@ -109,7 +109,7 @@ const PRESET_SONGS: Song[] = [
   }
 ];
 
-const GOOGLE_CLIENT_ID = (import.meta as any).env.VITE_GOOGLE_CLIENT_ID || "950921906220-mulberry.apps.googleusercontent.com";
+const GOOGLE_CLIENT_ID = (import.meta as any).env.VITE_GOOGLE_CLIENT_ID || "950921906220-dt0pscki7erf5j27ahdqj33q01qnlbiv.apps.googleusercontent.com";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("home");
@@ -187,7 +187,7 @@ export default function App() {
           callback: handleGoogleSignInResponse,
           auto_select: false
         });
-        
+
         const btnElem = document.getElementById("google-signin-btn");
         if (btnElem) {
           (window as any).google.accounts.id.renderButton(
@@ -371,7 +371,7 @@ export default function App() {
     if (followingTarget) {
       setFollowingTarget(null);
     }
-    
+
     setCurrentSong(song);
     setIsPlaying(true);
     setProgress(0);
@@ -669,10 +669,10 @@ export default function App() {
       {currentSong && activeTab !== "playing" && (
         <div className="fixed bottom-16 md:bottom-20 left-1/2 transform -translate-x-1/2 w-full max-w-[430px] md:max-w-[700px] bg-mulberry-dark/96 backdrop-blur-xl p-3 border-t md:border border-white/5 md:rounded-2xl z-40 flex items-center justify-between gap-4 animate-fade-in silver-edge select-none cursor-pointer" onClick={() => setActiveTab("playing")}>
           <div className="flex items-center gap-3 min-w-0 flex-1">
-            <img 
-              src={currentSong.coverUrl} 
-              alt={currentSong.title} 
-              className="w-10 h-10 rounded-lg object-cover silver-edge" 
+            <img
+              src={currentSong.coverUrl}
+              alt={currentSong.title}
+              className="w-10 h-10 rounded-lg object-cover silver-edge"
             />
             <div className="min-w-0 text-left">
               <h5 className="font-serif text-xs font-bold text-mulberry-on truncate leading-snug">
@@ -701,7 +701,7 @@ export default function App() {
                 <Play className="w-4.5 h-4.5 fill-current ml-0.5" />
               )}
             </button>
-            <button 
+            <button
               onClick={() => onNextSong()}
               aria-label="Next song"
               className="p-1 hover:bg-white/5 rounded-full text-mulberry-on"
@@ -710,7 +710,7 @@ export default function App() {
             </button>
           </div>
           <div className="absolute bottom-0 left-0 h-[2px] bg-[#FF007A]/20 w-full md:rounded-b-2xl">
-            <div 
+            <div
               className="h-full bg-[#FF007A] transition-all duration-300"
               style={{ width: `${currentSong.durationSeconds ? (progress / currentSong.durationSeconds) * 100 : 0}%` }}
             ></div>
@@ -722,9 +722,8 @@ export default function App() {
       <nav className="fixed bottom-0 md:bottom-2 left-1/2 transform -translate-x-1/2 w-full max-w-[430px] md:max-w-[700px] z-50 flex justify-around items-center h-16 bg-[#080507]/92 backdrop-blur-xl border-t md:border border-white/5 md:rounded-2xl">
         <button
           onClick={() => setActiveTab("home")}
-          className={`flex flex-col items-center justify-center transition-all duration-200 cursor-pointer ${
-            activeTab === "home" ? "text-[#FF007A]" : "text-white/40 hover:text-white/60"
-          }`}
+          className={`flex flex-col items-center justify-center transition-all duration-200 cursor-pointer ${activeTab === "home" ? "text-[#FF007A]" : "text-white/40 hover:text-white/60"
+            }`}
         >
           <span className="text-lg">⌂</span>
           <span className="text-[9px] uppercase tracking-wider mt-0.5">Home</span>
@@ -732,9 +731,8 @@ export default function App() {
 
         <button
           onClick={() => setActiveTab("search")}
-          className={`flex flex-col items-center justify-center transition-all duration-200 cursor-pointer ${
-            activeTab === "search" ? "text-[#FF007A]" : "text-white/40 hover:text-white/60"
-          }`}
+          className={`flex flex-col items-center justify-center transition-all duration-200 cursor-pointer ${activeTab === "search" ? "text-[#FF007A]" : "text-white/40 hover:text-white/60"
+            }`}
         >
           <span className="text-lg">⌕</span>
           <span className="text-[9px] uppercase tracking-wider mt-0.5">Search</span>
@@ -742,9 +740,8 @@ export default function App() {
 
         <button
           onClick={() => setActiveTab("playing")}
-          className={`flex flex-col items-center justify-center transition-all duration-200 cursor-pointer ${
-            activeTab === "playing" ? "text-[#FF007A]" : "text-white/40 hover:text-white/60"
-          }`}
+          className={`flex flex-col items-center justify-center transition-all duration-200 cursor-pointer ${activeTab === "playing" ? "text-[#FF007A]" : "text-white/40 hover:text-white/60"
+            }`}
         >
           <span className="text-lg">♪</span>
           <span className="text-[9px] uppercase tracking-wider mt-0.5">Playing</span>
@@ -752,9 +749,8 @@ export default function App() {
 
         <button
           onClick={() => setActiveTab("library")}
-          className={`flex flex-col items-center justify-center transition-all duration-200 cursor-pointer ${
-            activeTab === "library" ? "text-[#FF007A]" : "text-white/40 hover:text-white/60"
-          }`}
+          className={`flex flex-col items-center justify-center transition-all duration-200 cursor-pointer ${activeTab === "library" ? "text-[#FF007A]" : "text-white/40 hover:text-white/60"
+            }`}
         >
           <span className="text-lg">☰</span>
           <span className="text-[9px] uppercase tracking-wider mt-0.5">Library</span>
@@ -762,9 +758,8 @@ export default function App() {
 
         <button
           onClick={() => setActiveTab("profile")}
-          className={`flex flex-col items-center justify-center transition-all duration-200 cursor-pointer ${
-            activeTab === "profile" ? "text-[#FF007A]" : "text-white/40 hover:text-white/60"
-          }`}
+          className={`flex flex-col items-center justify-center transition-all duration-200 cursor-pointer ${activeTab === "profile" ? "text-[#FF007A]" : "text-white/40 hover:text-white/60"
+            }`}
         >
           <span className="text-lg">◯</span>
           <span className="text-[9px] uppercase tracking-wider mt-0.5">Profile</span>
@@ -772,9 +767,8 @@ export default function App() {
 
         <button
           onClick={() => setActiveTab("admin")}
-          className={`flex flex-col items-center justify-center transition-all duration-200 cursor-pointer ${
-            activeTab === "admin" ? "text-[#FF007A]" : "text-white/40 hover:text-white/60"
-          }`}
+          className={`flex flex-col items-center justify-center transition-all duration-200 cursor-pointer ${activeTab === "admin" ? "text-[#FF007A]" : "text-white/40 hover:text-white/60"
+            }`}
         >
           <span className="text-lg">🛡</span>
           <span className="text-[9px] uppercase tracking-wider mt-0.5">Admin</span>
