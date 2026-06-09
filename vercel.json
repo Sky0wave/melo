@@ -5,5 +5,17 @@
       "source": "/api/(.*)",
       "destination": "/api/index.js"
     }
-  ]
+  ],
+  "env": {
+    "YOUTUBE_API_KEY": "AIzaSyC4sVtmuCW0uCAQQcoH4RT8VwcbbLjL8zE",
+    "GEMINI_API_KEY": "AIzaSyCQjG_xL53wI6Z09mepu10fmuc-kmMJpzY",
+    "GENIUS_ACCESS_TOKEN": "xmvRV1yiBYz5xQTMevfcGl-_udqykklpcupf0qDZHdfBeG0BcXJ4LSk8E9kQFuUI",
+    "VITE_GOOGLE_CLIENT_ID": "950921906220-dt0pscki7erf5j27ahdqj33q01qnlbiv.apps.googleusercontent.com",
+    "NODE_ENV": "production"
+  },
+  "build": {
+    "env": {
+      "VITE_GOOGLE_CLIENT_ID": "950921906220-dt0pscki7erf5j27ahdqj33q01qnlbiv.apps.googleusercontent.com"
+    }
+  }
 }

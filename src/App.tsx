@@ -382,6 +382,23 @@ export default function App() {
       return [song, ...prev];
     });
 
+    // Permanently cache YouTube songs into the database so they're searchable forever
+    if (song.videoId && (song.id.startsWith("yt_") || song.source === "youtube")) {
+      fetch("/api/tracks/cache", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          videoId: song.videoId,
+          title: song.title,
+          artist: song.artist,
+          duration: song.duration,
+          durationSeconds: song.durationSeconds,
+          coverUrl: song.coverUrl,
+          genre: song.genre
+        })
+      }).catch(() => {}); // fire-and-forget, DB offline is handled gracefully
+    }
+
     // Track listening habit increment
     setListeningHabits(prev => {
       const existing = prev.find(h => h.songId === song.id);

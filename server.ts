@@ -324,6 +324,59 @@ app.get("/api/tracks", async (req, res) => {
   res.json(allFallbackSongs.slice(0, 100));
 });
 
+// Cache a single played song permanently into PostgreSQL
+// Called by frontend whenever a YouTube song is played
+app.post("/api/tracks/cache", async (req, res) => {
+  const { videoId, title, artist, duration, durationSeconds, coverUrl, genre } = req.body;
+  
+  if (!videoId || !title) {
+    return res.status(400).json({ error: "videoId and title are required" });
+  }
+
+  // Detect language heuristically
+  const titleLower = (title + " " + (artist || "")).toLowerCase();
+  const hindiKeywords = [
+    "tum", "hi", "ho", "kesariya", "dil", "pyar", "aashiqui", "singh", "dosanjh", "pasoori",
+    "goli", "ki", "raasleela", "ram-leela", "shreya", "ghoshal", "nehha", "kakkar", "arijit",
+    "jubin", "nautiyal", "sonu", "nigam", "lata", "mangeshkar", "kishore", "kumar", "atif", "aslam",
+    "tere", "bin", "rabba", "jeena", "sanam", "sufi", "bollywood", "t-series", "zee music", "tips"
+  ];
+  let lang = genre || "english";
+  if (lang === "YouTube Music" || lang === "Music" || lang === "Streaming") {
+    lang = /[^\x00-\x7F]/.test(title) || hindiKeywords.some(kw => titleLower.includes(kw))
+      ? "hindi"
+      : "english";
+  }
+
+  try {
+    await pool.query(`
+      INSERT INTO songs (video_id, title, artist, duration, duration_seconds, cover_url, language)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      ON CONFLICT (video_id) DO UPDATE
+        SET title = EXCLUDED.title,
+            artist = EXCLUDED.artist,
+            duration = EXCLUDED.duration,
+            duration_seconds = EXCLUDED.duration_seconds,
+            cover_url = EXCLUDED.cover_url,
+            language = EXCLUDED.language
+    `, [
+      videoId,
+      title,
+      artist || "YouTube Artist",
+      duration || "03:00",
+      durationSeconds || 180,
+      coverUrl || `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+      lang
+    ]);
+    console.log(`[DB Cache] Upserted song: "${title}" (${videoId})`);
+    res.json({ success: true });
+  } catch (dbErr: any) {
+    // DB offline — silently ok, song exists in memory fallback
+    console.warn(`[DB Cache] DB offline, skipping cache for "${title}":`, dbErr.message);
+    res.json({ success: false, cached: false, reason: "db_offline" });
+  }
+});
+
 // Real-time Update API: receive player updates from individual users and broadcast them
 app.post("/api/sync/update", (req, res) => {
   const { username, currentSongId, isPlaying, progress, songTitle, songArtist, songCoverUrl } = req.body;

@@ -147,9 +147,12 @@ export function AdminPanel({
     }
   };
 
+  // Auto-refresh metrics every 30 seconds when unlocked
   useEffect(() => {
     if (isAdminUnlocked && adminPassword) {
       fetchMetrics(adminPassword);
+      const interval = setInterval(() => fetchMetrics(adminPassword), 30000);
+      return () => clearInterval(interval);
     }
   }, [isAdminUnlocked, adminPassword]);
 
@@ -269,7 +272,16 @@ export function AdminPanel({
             <Music className="w-6 h-6 text-purple-400" />
           </div>
           <div>
-            <span className="font-sans text-[10px] text-white/40 uppercase tracking-widest block">Cached Songs</span>
+            <span className="font-sans text-[10px] text-white/40 uppercase tracking-widest flex items-center gap-1.5">
+              Cached Songs
+              <span className="flex items-center gap-1 text-emerald-400 text-[8px] font-bold">
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400"></span>
+                </span>
+                LIVE
+              </span>
+            </span>
             <span className="font-serif text-2xl font-bold text-purple-400 block mt-0.5">
               {metrics ? metrics.totalSongs : "—"}
             </span>
