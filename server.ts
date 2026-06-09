@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import pg from "pg";
@@ -214,6 +215,45 @@ const PRESET_SONGS = [
   }
 ];
 
+// Dynamically load fallback songs from fallback_songs.json if available
+let allFallbackSongs = [...PRESET_SONGS];
+try {
+  const fallbackPath = path.join(process.cwd(), "fallback_songs.json");
+  if (fs.existsSync(fallbackPath)) {
+    const fileContent = fs.readFileSync(fallbackPath, "utf-8");
+    const loadedSongs = JSON.parse(fileContent);
+    if (Array.isArray(loadedSongs)) {
+      // Map properties to match what the frontend expects
+      const formatted = loadedSongs.map((row: any) => ({
+        id: row.id || `yt_${row.video_id}`,
+        title: row.title,
+        artist: row.artist,
+        album: row.album || (row.language ? `${row.language.toUpperCase()} Library` : "Local Library"),
+        duration: row.duration || "03:00",
+        durationSeconds: row.duration_seconds || row.durationSeconds || 180,
+        genre: row.genre || row.language || "Music",
+        mood: row.mood || "Database Fallback",
+        lyrics: row.lyrics || "",
+        coverUrl: row.cover_url || row.coverUrl || `https://img.youtube.com/vi/${row.video_id}/hqdefault.jpg`,
+        videoId: row.video_id || row.videoId || "",
+        source: row.source || "youtube"
+      }));
+      
+      // Combine and filter out duplicates
+      const seenIds = new Set(PRESET_SONGS.map(s => s.id));
+      for (const song of formatted) {
+        if (!seenIds.has(song.id)) {
+          allFallbackSongs.push(song);
+          seenIds.add(song.id);
+        }
+      }
+      console.log(`Loaded ${formatted.length} fallback songs from fallback_songs.json (Total offline: ${allFallbackSongs.length})`);
+    }
+  }
+} catch (err: any) {
+  console.error("Failed to load fallback_songs.json:", err.message);
+}
+
 // Active synchronization database (stores active listening clients)
 interface SyncState {
   currentSongId: string | null;
@@ -285,7 +325,7 @@ app.get("/api/tracks", async (req, res) => {
   } catch (err) {
     console.error("Failed to fetch tracks from database:", err);
   }
-  res.json(PRESET_SONGS);
+  res.json(allFallbackSongs.slice(0, 100));
 });
 
 // Real-time Update API: receive player updates from individual users and broadcast them
@@ -371,7 +411,7 @@ app.post("/api/search", async (req, res) => {
   ].filter(Boolean).join(", ");
 
   if (!filterText) {
-    return res.json(PRESET_SONGS);
+    return res.json(allFallbackSongs);
   }
 
   // First do local fuzzy search within pre-curated songs
@@ -380,9 +420,9 @@ app.post("/api/search", async (req, res) => {
   const lowercaseArtist = (artist || "").toLowerCase();
   const lowercaseGenre = (genre || "").toLowerCase();
 
-  const matchedPresets = PRESET_SONGS.filter(song => {
+  const matchedPresets = allFallbackSongs.filter(song => {
     return (
-      (lowercaseQuery && (song.title.toLowerCase().includes(lowercaseQuery) || song.artist.toLowerCase().includes(lowercaseQuery) || song.album.toLowerCase().includes(lowercaseQuery))) ||
+      (lowercaseQuery && (song.title.toLowerCase().includes(lowercaseQuery) || song.artist.toLowerCase().includes(lowercaseQuery) || (song.album && song.album.toLowerCase().includes(lowercaseQuery)))) ||
       (lowercaseMood && song.mood.toLowerCase().includes(lowercaseMood)) ||
       (lowercaseArtist && song.artist.toLowerCase().includes(lowercaseArtist)) ||
       (lowercaseGenre && song.genre.toLowerCase().includes(lowercaseGenre))
@@ -392,7 +432,7 @@ app.post("/api/search", async (req, res) => {
   // If we match presets, prioritize returning them. If there's no model setup or a mismatch, fallback to matches or generated ones.
   if (!ai) {
     console.log("No Gemini API Key found. Returning local matches/presets.");
-    return res.json(matchedPresets.length > 0 ? matchedPresets : PRESET_SONGS);
+    return res.json(matchedPresets.length > 0 ? matchedPresets : allFallbackSongs);
   }
 
   try {
@@ -462,11 +502,11 @@ JSON Schema format:
       return true;
     });
 
-    res.json(finishedList.length > 0 ? finishedList : PRESET_SONGS);
+    res.json(finishedList.length > 0 ? finishedList : allFallbackSongs);
   } catch (error) {
     console.error("Gemini song search extraction failed:", error);
     // In case of error or quota limits, return fuzzy filter presets
-    res.json(matchedPresets.length > 0 ? matchedPresets : PRESET_SONGS);
+    res.json(matchedPresets.length > 0 ? matchedPresets : allFallbackSongs);
   }
 });
 
@@ -706,11 +746,11 @@ app.post("/api/db/search", async (req, res) => {
     console.error("Local DB search query failed, falling back to presets:", error);
     // Fallback to searching presets
     const lowercaseQuery = (query || "").toLowerCase();
-    const matchedPresets = PRESET_SONGS.filter(song => {
+    const matchedPresets = allFallbackSongs.filter(song => {
       return (
         song.title.toLowerCase().includes(lowercaseQuery) ||
         song.artist.toLowerCase().includes(lowercaseQuery) ||
-        song.album.toLowerCase().includes(lowercaseQuery)
+        (song.album && song.album.toLowerCase().includes(lowercaseQuery))
       );
     });
     res.json({ results: matchedPresets, didYouMean: "" });
@@ -750,11 +790,11 @@ async function handleYoutubeSearchFallback(query: string, maxResults: number, re
   }
 
   const lowercaseQuery = (query || "").toLowerCase();
-  const matchedPresets = PRESET_SONGS.filter(song => {
+  const matchedPresets = allFallbackSongs.filter(song => {
     return (
       song.title.toLowerCase().includes(lowercaseQuery) ||
       song.artist.toLowerCase().includes(lowercaseQuery) ||
-      song.album.toLowerCase().includes(lowercaseQuery)
+      (song.album && song.album.toLowerCase().includes(lowercaseQuery))
     );
   });
   return res.json({ results: matchedPresets, didYouMean: "" });
@@ -1068,7 +1108,7 @@ app.post("/api/generate-daily-playlist", async (req, res) => {
     return res.json({
       name: "Mulberry Daily Mix",
       description: "A dark tailored cocktail of deep ambient and midnight grooves.",
-      songs: PRESET_SONGS.slice(0, 4)
+      songs: allFallbackSongs.slice(0, 4)
     });
   }
 
@@ -1141,7 +1181,7 @@ You must respond ONLY in a clean JSON format matching this schema:
     res.json({
       name: "Mulberry Daily Mix - Velvet Twilight",
       description: "A dark tailored cocktail of deep ambient and midnight grooves, styled for contemplative listenership.",
-      songs: PRESET_SONGS.slice(0, 5)
+      songs: allFallbackSongs.slice(0, 5)
     });
   }
 });
@@ -1228,7 +1268,7 @@ app.get("/api/admin/metrics", async (req, res) => {
   try {
     let totalRegisteredUsers = 0;
     let registeredUsers: any[] = [];
-    let totalSongs = PRESET_SONGS.length;
+    let totalSongs = allFallbackSongs.length;
 
     try {
       // 1. Get total registered users count
