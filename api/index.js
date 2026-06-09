@@ -3227,6 +3227,15 @@ async function setupDatabase() {
       );
     `);
     console.log("[DB Pool] \u2705 user_listens table ready");
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS search_cache (
+        id SERIAL PRIMARY KEY,
+        query VARCHAR(500) UNIQUE NOT NULL,
+        video_ids TEXT[] NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log("[DB Pool] \u2705 search_cache table ready");
   } catch (e) {
     console.warn("[DB Pool] \u26A0\uFE0F Database setup failed (will retry on first request):", e.message);
   }
@@ -3808,7 +3817,41 @@ app.post("/api/smart/search", async (req, res) => {
     return res.json({ results: [], source: "none", didYouMean: "" });
   }
   const cleanQuery = query.trim();
+  const cacheKey = cleanQuery.toLowerCase();
   const words = cleanQuery.split(/\s+/).filter((w) => w.length > 0);
+  try {
+    const cacheResult = await pool.query("SELECT video_ids FROM search_cache WHERE query = $1", [cacheKey]);
+    if (cacheResult.rows.length > 0) {
+      const videoIds = cacheResult.rows[0].video_ids;
+      if (videoIds && videoIds.length > 0) {
+        const songsResult = await pool.query(
+          "SELECT * FROM songs WHERE video_id = ANY($1)",
+          [videoIds]
+        );
+        const songMap = new Map(songsResult.rows.map((row) => [row.video_id, row]));
+        const songs = videoIds.map((vid) => songMap.get(vid)).filter(Boolean).map((row) => ({
+          id: `yt_${row.video_id}`,
+          title: row.title,
+          artist: row.artist,
+          album: row.language ? `${row.language.toUpperCase()} Library` : "Cached",
+          duration: row.duration || "03:00",
+          durationSeconds: row.duration_seconds || 180,
+          genre: row.language || "Music",
+          mood: "Cached",
+          lyrics: "",
+          coverUrl: row.cover_url || `https://img.youtube.com/vi/${row.video_id}/hqdefault.jpg`,
+          videoId: row.video_id,
+          source: "youtube"
+        }));
+        if (songs.length > 0) {
+          console.log(`[Smart Search] \u26A1 QUERY CACHE HIT: "${cacheKey}" \u2192 ${songs.length} results`);
+          return res.json({ results: songs, source: "database", didYouMean: "" });
+        }
+      }
+    }
+  } catch (cacheErr) {
+    console.warn(`[Smart Search] \u26A0\uFE0F Query cache lookup failed for "${cleanQuery}":`, cacheErr.message);
+  }
   if (words.length > 0) {
     try {
       const conditions = [];
@@ -3855,6 +3898,17 @@ app.post("/api/smart/search", async (req, res) => {
           videoId: row.video_id,
           source: "youtube"
         }));
+        const videoIdsToCache = songs.map((s) => s.videoId);
+        if (videoIdsToCache.length > 0) {
+          pool.query(`
+            INSERT INTO search_cache (query, video_ids)
+            VALUES ($1, $2)
+            ON CONFLICT (query) DO UPDATE
+            SET video_ids = EXCLUDED.video_ids, created_at = CURRENT_TIMESTAMP
+          `, [cacheKey, videoIdsToCache]).catch((err) => {
+            console.warn("[Smart Search] Failed to write query cache for DB hit:", err.message);
+          });
+        }
         console.log(`[Smart Search] \u26A1 DB HIT: "${cleanQuery}" \u2192 ${songs.length} cached results`);
         return res.json({ results: songs, source: "database", didYouMean: "" });
       }
@@ -3929,6 +3983,18 @@ app.post("/api/smart/search", async (req, res) => {
         }
       }
       await cacheToDb(validSongs);
+      const videoIdsToCache = validSongs.map((s) => s.videoId);
+      try {
+        await pool.query(`
+          INSERT INTO search_cache (query, video_ids)
+          VALUES ($1, $2)
+          ON CONFLICT (query) DO UPDATE
+          SET video_ids = EXCLUDED.video_ids, created_at = CURRENT_TIMESTAMP
+        `, [cacheKey, videoIdsToCache]);
+        console.log(`[Smart Search] \u{1F4BE} Query cache saved: "${cacheKey}" -> [${videoIdsToCache.join(",")}]`);
+      } catch (cacheWriteErr) {
+        console.warn(`[Smart Search] Failed to write query cache for YouTube fetch:`, cacheWriteErr.message);
+      }
     }
     console.log(`[Smart Search] \u{1F534} YouTube LIVE: "${cleanQuery}" \u2192 ${ytSongs.length} results \u2014 cached to Neon`);
     return res.json({ results: ytSongs, source: "youtube", didYouMean: "" });

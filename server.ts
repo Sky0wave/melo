@@ -43,6 +43,17 @@ async function setupDatabase() {
       );
     `);
     console.log("[DB Pool] ✅ user_listens table ready");
+
+    // Create search_cache table if not exists
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS search_cache (
+        id SERIAL PRIMARY KEY,
+        query VARCHAR(500) UNIQUE NOT NULL,
+        video_ids TEXT[] NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log("[DB Pool] ✅ search_cache table ready");
   } catch (e: any) {
     console.warn("[DB Pool] ⚠️ Database setup failed (will retry on first request):", e.message);
   }
@@ -732,7 +743,49 @@ app.post("/api/smart/search", async (req, res) => {
   }
 
   const cleanQuery = query.trim();
+  const cacheKey = cleanQuery.toLowerCase();
   const words = cleanQuery.split(/\s+/).filter(w => w.length > 0);
+
+  // ── Step 0: Check Query/Typo Cache ──────────────────────────────────────────
+  try {
+    const cacheResult = await pool.query("SELECT video_ids FROM search_cache WHERE query = $1", [cacheKey]);
+    if (cacheResult.rows.length > 0) {
+      const videoIds = cacheResult.rows[0].video_ids;
+      if (videoIds && videoIds.length > 0) {
+        const songsResult = await pool.query(
+          "SELECT * FROM songs WHERE video_id = ANY($1)",
+          [videoIds]
+        );
+        
+        // Sort songs in the exact order of the videoIds in the cache
+        const songMap = new Map(songsResult.rows.map(row => [row.video_id, row]));
+        const songs = videoIds
+          .map((vid: string) => songMap.get(vid))
+          .filter(Boolean)
+          .map((row: any) => ({
+            id: `yt_${row.video_id}`,
+            title: row.title,
+            artist: row.artist,
+            album: row.language ? `${row.language.toUpperCase()} Library` : "Cached",
+            duration: row.duration || "03:00",
+            durationSeconds: row.duration_seconds || 180,
+            genre: row.language || "Music",
+            mood: "Cached",
+            lyrics: "",
+            coverUrl: row.cover_url || `https://img.youtube.com/vi/${row.video_id}/hqdefault.jpg`,
+            videoId: row.video_id,
+            source: "youtube"
+          }));
+
+        if (songs.length > 0) {
+          console.log(`[Smart Search] ⚡ QUERY CACHE HIT: "${cacheKey}" → ${songs.length} results`);
+          return res.json({ results: songs, source: "database", didYouMean: "" });
+        }
+      }
+    }
+  } catch (cacheErr: any) {
+    console.warn(`[Smart Search] ⚠️ Query cache lookup failed for "${cleanQuery}":`, cacheErr.message);
+  }
 
   // ── Step 1: Search Neon DB first ──────────────────────────────────────────
   if (words.length > 0) {
@@ -792,6 +845,19 @@ app.post("/api/smart/search", async (req, res) => {
           videoId: row.video_id,
           source: "youtube"
         }));
+
+        // Cache this successful DB match to search_cache
+        const videoIdsToCache = songs.map(s => s.videoId);
+        if (videoIdsToCache.length > 0) {
+          pool.query(`
+            INSERT INTO search_cache (query, video_ids)
+            VALUES ($1, $2)
+            ON CONFLICT (query) DO UPDATE
+            SET video_ids = EXCLUDED.video_ids, created_at = CURRENT_TIMESTAMP
+          `, [cacheKey, videoIdsToCache]).catch(err => {
+            console.warn("[Smart Search] Failed to write query cache for DB hit:", err.message);
+          });
+        }
 
         console.log(`[Smart Search] ⚡ DB HIT: "${cleanQuery}" → ${songs.length} cached results`);
         return res.json({ results: songs, source: "database", didYouMean: "" });
@@ -880,6 +946,20 @@ app.post("/api/smart/search", async (req, res) => {
       // Await before responding — Vercel kills lambdas immediately after res.json()
       // so fire-and-forget writes never complete on serverless
       await cacheToDb(validSongs);
+
+      // Save the query cache association!
+      const videoIdsToCache = validSongs.map(s => s.videoId);
+      try {
+        await pool.query(`
+          INSERT INTO search_cache (query, video_ids)
+          VALUES ($1, $2)
+          ON CONFLICT (query) DO UPDATE
+          SET video_ids = EXCLUDED.video_ids, created_at = CURRENT_TIMESTAMP
+        `, [cacheKey, videoIdsToCache]);
+        console.log(`[Smart Search] 💾 Query cache saved: "${cacheKey}" -> [${videoIdsToCache.join(",")}]`);
+      } catch (cacheWriteErr: any) {
+        console.warn(`[Smart Search] Failed to write query cache for YouTube fetch:`, cacheWriteErr.message);
+      }
     }
 
     console.log(`[Smart Search] 🔴 YouTube LIVE: "${cleanQuery}" → ${ytSongs.length} results — cached to Neon`);
