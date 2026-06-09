@@ -740,7 +740,7 @@ app.post("/api/db/search", async (req, res) => {
     res.json({ results: songs, didYouMean });
   } catch (error) {
     console.error("Local DB search query failed, falling back to presets:", error);
-    // Fallback to searching presets
+    // Fallback to searching allFallbackSongs
     const lowercaseQuery = (query || "").toLowerCase();
     const matchedPresets = allFallbackSongs.filter(song => {
       return (
@@ -748,7 +748,7 @@ app.post("/api/db/search", async (req, res) => {
         song.artist.toLowerCase().includes(lowercaseQuery) ||
         (song.album && song.album.toLowerCase().includes(lowercaseQuery))
       );
-    });
+    }).slice(0, Number(limit) || 20);
     res.json({ results: matchedPresets, didYouMean: "" });
   }
 });
@@ -792,7 +792,7 @@ async function handleYoutubeSearchFallback(query: string, maxResults: number, re
       song.artist.toLowerCase().includes(lowercaseQuery) ||
       (song.album && song.album.toLowerCase().includes(lowercaseQuery))
     );
-  });
+  }).slice(0, maxResults);
   return res.json({ results: matchedPresets, didYouMean: "" });
 }
 

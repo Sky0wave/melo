@@ -3832,7 +3832,7 @@ app.post("/api/db/search", async (req, res) => {
     const lowercaseQuery = (query || "").toLowerCase();
     const matchedPresets = allFallbackSongs.filter((song) => {
       return song.title.toLowerCase().includes(lowercaseQuery) || song.artist.toLowerCase().includes(lowercaseQuery) || song.album && song.album.toLowerCase().includes(lowercaseQuery);
-    });
+    }).slice(0, Number(limit) || 20);
     res.json({ results: matchedPresets, didYouMean: "" });
   }
 });
@@ -3868,7 +3868,7 @@ async function handleYoutubeSearchFallback(query, maxResults, res) {
   const lowercaseQuery = (query || "").toLowerCase();
   const matchedPresets = allFallbackSongs.filter((song) => {
     return song.title.toLowerCase().includes(lowercaseQuery) || song.artist.toLowerCase().includes(lowercaseQuery) || song.album && song.album.toLowerCase().includes(lowercaseQuery);
-  });
+  }).slice(0, maxResults);
   return res.json({ results: matchedPresets, didYouMean: "" });
 }
 app.post("/api/youtube/search", async (req, res) => {
