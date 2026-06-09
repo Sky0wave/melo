@@ -1,6 +1,40 @@
 <!doctype html>
 <html lang="en" class="dark">
   <head>
+    <script>
+      (function() {
+        const suppress = [
+          'google.accounts.id.initialize',
+          'web-share',
+          'postMessage',
+          'DOMWindow',
+          'youtube.com/youtubei/v1/log_event',
+          'www-widgetapi'
+        ];
+        
+        const shouldSuppress = (args) => {
+          try {
+            const msg = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ');
+            return suppress.some(keyword => msg.includes(keyword));
+          } catch (e) {
+            return false;
+          }
+        };
+
+        const originalWarn = console.warn;
+        const originalError = console.error;
+
+        console.warn = function(...args) {
+          if (shouldSuppress(args)) return;
+          originalWarn.apply(console, args);
+        };
+
+        console.error = function(...args) {
+          if (shouldSuppress(args)) return;
+          originalError.apply(console, args);
+        };
+      })();
+    </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Melo — Obsidian Cathedral</title>

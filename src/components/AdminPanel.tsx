@@ -18,6 +18,7 @@ interface RegisteredUser {
   role: string;
   created_at: string;
   last_login: string;
+  listens_today?: number;
 }
 
 interface ActiveUser {
@@ -31,12 +32,27 @@ interface ActiveUser {
   lastUpdated: number;
 }
 
+interface UserListenDaily {
+  username: string;
+  date: string;
+  count: number;
+}
+
+interface UserListenRecent {
+  username: string;
+  song_title: string;
+  artist: string;
+  timestamp: string;
+}
+
 interface Metrics {
   totalRegisteredUsers: number;
   registeredUsers: RegisteredUser[];
   totalSongs: number;
   activeUsersCount: number;
   activeUsers: ActiveUser[];
+  userListensDaily?: UserListenDaily[];
+  userListensRecent?: UserListenRecent[];
 }
 
 export function AdminPanel({
@@ -46,11 +62,26 @@ export function AdminPanel({
   setIsAdminUnlocked,
   currentUsername
 }: AdminPanelProps) {
+  const getTodayString = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
+  const todayStr = getTodayString();
+  const totalListensToday = metrics?.userListensDaily
+    ? metrics.userListensDaily
+        .filter((item) => item.date === todayStr)
+        .reduce((sum, item) => sum + item.count, 0)
+    : 0;
+
   const [passwordInput, setPasswordInput] = useState(adminPassword);
   const [errorMsg, setErrorMsg] = useState("");
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<"users" | "active" | "system">("users");
+  const [activeTab, setActiveTab] = useState<"users" | "active" | "history">("users");
 
   const fetchMetrics = async (pwd: string) => {
     setIsLoading(true);
@@ -313,11 +344,106 @@ export function AdminPanel({
             <div className="absolute bottom-0 left-0 w-full h-[2px] bg-[#FF007A]"></div>
           )}
         </button>
+        <button
+          onClick={() => setActiveTab("history")}
+          className={`pb-3 font-sans text-xs font-bold uppercase tracking-wider transition-all relative cursor-pointer ${
+            activeTab === "history" ? "text-[#FF007A]" : "text-white/40 hover:text-white/60"
+          }`}
+        >
+          User Listens (7d)
+          {activeTab === "history" && (
+            <div className="absolute bottom-0 left-0 w-full h-[2px] bg-[#FF007A]"></div>
+          )}
+        </button>
       </div>
 
       {/* Tab Content */}
       <div className="min-h-[300px]">
-        {activeTab === "users" ? (
+        {activeTab === "history" ? (
+          <div className="space-y-6 animate-fade-in">
+            {/* Daily stats table */}
+            <div className="glass-panel rounded-2xl border border-white/5 overflow-hidden">
+              <div className="p-4 border-b border-white/5 flex justify-between items-center bg-white/[0.01]">
+                <h3 className="font-serif text-sm font-bold text-white">Daily Listening Counts (Last 7 Days)</h3>
+                <span className="text-[8px] font-sans font-bold bg-[#FF007A]/10 border border-[#FF007A]/20 text-[#FF007A] px-2 py-0.5 rounded-full uppercase tracking-wider">
+                  Aggregate Counts
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-white/[0.02] border-b border-white/5 text-[9px] font-sans font-bold uppercase tracking-widest text-white/40">
+                      <th className="p-4">User</th>
+                      <th className="p-4">Date</th>
+                      <th className="p-4">Songs Listened</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5 text-[11px] font-sans">
+                    {!metrics?.userListensDaily || metrics.userListensDaily.length === 0 ? (
+                      <tr>
+                        <td colSpan={3} className="p-8 text-center text-white/30 italic">
+                          No listening data recorded in the last 7 days.
+                        </td>
+                      </tr>
+                    ) : (
+                      metrics.userListensDaily.map((item, idx) => (
+                        <tr key={idx} className="hover:bg-white/[0.01] transition-colors">
+                          <td className="p-4 font-bold text-white">{item.username}</td>
+                          <td className="p-4 text-white/70">{item.date}</td>
+                          <td className="p-4">
+                            <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[9px] font-bold">
+                              {item.count} tracks
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Recent list */}
+            <div className="glass-panel rounded-2xl border border-white/5 overflow-hidden">
+              <div className="p-4 border-b border-white/5 flex justify-between items-center bg-white/[0.01]">
+                <h3 className="font-serif text-sm font-bold text-white">Recent Songs Listened (Last 7 Days)</h3>
+                <span className="text-[8px] font-sans font-bold bg-purple-500/10 border border-purple-500/20 text-purple-400 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                  Stream Log
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-white/[0.02] border-b border-white/5 text-[9px] font-sans font-bold uppercase tracking-widest text-white/40">
+                      <th className="p-4">User</th>
+                      <th className="p-4">Track Title</th>
+                      <th className="p-4">Artist</th>
+                      <th className="p-4">Played At</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5 text-[11px] font-sans">
+                    {!metrics?.userListensRecent || metrics.userListensRecent.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="p-8 text-center text-white/30 italic">
+                          No play history logs found in the last 7 days.
+                        </td>
+                      </tr>
+                    ) : (
+                      metrics.userListensRecent.map((item, idx) => (
+                        <tr key={idx} className="hover:bg-white/[0.01] transition-colors">
+                          <td className="p-4 font-bold text-white">{item.username}</td>
+                          <td className="p-4 text-[#FF007A] font-serif">{item.song_title}</td>
+                          <td className="p-4 text-white/70">{item.artist}</td>
+                          <td className="p-4 text-white/40 font-mono text-[10px]">{item.timestamp}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        ) : activeTab === "users" ? (
           <div className="glass-panel rounded-2xl border border-white/5 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
@@ -329,13 +455,14 @@ export function AdminPanel({
                     <th className="p-4">Role</th>
                     <th className="p-4">Joined</th>
                     <th className="p-4">Last Login</th>
+                    <th className="p-4">Listens Today</th>
                     <th className="p-4 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5 text-[11px] font-sans">
                   {metrics?.registeredUsers.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="p-8 text-center text-white/30 italic">
+                      <td colSpan={8} className="p-8 text-center text-white/30 italic">
                         No Google authenticated users found in the database.
                       </td>
                     </tr>
@@ -381,6 +508,11 @@ export function AdminPanel({
                         </td>
                         <td className="p-4 text-white/70">
                           {new Date(user.last_login).toLocaleString()}
+                        </td>
+                        <td className="p-4 text-white/70 font-mono text-[10px]">
+                          <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[9px] font-bold">
+                            {user.listens_today || 0} tracks
+                          </span>
                         </td>
                         <td className="p-4 text-right space-x-1.5">
                           <button

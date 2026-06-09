@@ -24,11 +24,31 @@ pool.on("error", (err) => {
   console.error("[DB Pool] Unexpected idle client error:", err.message);
 });
 
-// Warm up the pool immediately at server start so the first search request
-// doesn't wait for a cold SSL handshake (~9-17s on Neon).
-pool.query("SELECT 1")
-  .then(() => console.log("[DB Pool] ✅ Connection warm — ready for searches"))
-  .catch((e) => console.warn("[DB Pool] ⚠️ Warm-up failed (will retry on first request):", e.message));
+// Warm up the pool immediately and initialize tables if they don't exist
+async function setupDatabase() {
+  try {
+    await pool.query("SELECT 1");
+    console.log("[DB Pool] ✅ Connection warm — checking tables");
+    
+    // Create user_listens table if not exists
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_listens (
+        id SERIAL PRIMARY KEY,
+        user_id INT,
+        username VARCHAR(255) NOT NULL,
+        song_id VARCHAR(255) NOT NULL,
+        song_title VARCHAR(500) NOT NULL,
+        artist VARCHAR(300) NOT NULL,
+        listened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log("[DB Pool] ✅ user_listens table ready");
+  } catch (e: any) {
+    console.warn("[DB Pool] ⚠️ Database setup failed (will retry on first request):", e.message);
+  }
+}
+
+setupDatabase();
 
 // ── Robust DB cache writer ───────────────────────────────────────────────────
 // Used by every search route. Retries once on transient errors, logs clearly.
@@ -36,13 +56,23 @@ async function cacheToDb(songs: any[]): Promise<void> {
   const valid = songs.filter(s => s.videoId && s.videoId.trim().length > 0);
   if (valid.length === 0) return;
 
+  // Deduplicate songs by videoId within the same batch to avoid PostgreSQL cardinality errors
+  const uniqueSongs: any[] = [];
+  const seenVideoIds = new Set<string>();
+  for (const song of valid) {
+    if (!seenVideoIds.has(song.videoId)) {
+      seenVideoIds.add(song.videoId);
+      uniqueSongs.push(song);
+    }
+  }
+
   const hindiKw = ["tum","kesariya","dil","pyar","aashiqui","singh","dosanjh","pasoori","arijit",
                    "jubin","sonu","lata","atif","tere","rabba","sanam","bollywood","t-series","zee music"];
 
   const values: any[] = [];
   const placeholders: string[] = [];
   let pi = 0;
-  for (const song of valid) {
+  for (const song of uniqueSongs) {
     const base = pi * 7;
     placeholders.push(`($${base+1},$${base+2},$${base+3},$${base+4},$${base+5},$${base+6},$${base+7})`);
     const tl = (song.title + " " + (song.artist || "")).toLowerCase();
@@ -71,7 +101,7 @@ async function cacheToDb(songs: any[]): Promise<void> {
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
       await pool.query(sql, values);
-      console.log(`[DB Cache] ✅ Upserted ${valid.length} songs (attempt ${attempt})`);
+      console.log(`[DB Cache] ✅ Upserted ${uniqueSongs.length} songs (attempt ${attempt})`);
       return;
     } catch (err: any) {
       console.error(`[DB Cache] ❌ Attempt ${attempt} failed: ${err.message}`);
@@ -81,7 +111,7 @@ async function cacheToDb(songs: any[]): Promise<void> {
 }
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.use(express.json());
 
@@ -425,6 +455,27 @@ app.post("/api/tracks/cache", async (req, res) => {
   }
 });
 
+// Record a song listen event
+app.post("/api/listens", async (req, res) => {
+  const { userId, username, songId, songTitle, artist } = req.body;
+  if (!username || !songId || !songTitle || !artist) {
+    return res.status(400).json({ error: "Missing required listen fields." });
+  }
+
+  const numericUserId = userId && userId !== 9999 ? (typeof userId === "string" ? parseInt(userId, 10) : userId) : null;
+
+  try {
+    await pool.query(`
+      INSERT INTO user_listens (user_id, username, song_id, song_title, artist, listened_at)
+      VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+    `, [numericUserId, username, songId, songTitle, artist]);
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error("[Listen Tracker] Error saving listen:", err.message);
+    res.status(500).json({ error: "Failed to record listen.", message: err.message });
+  }
+});
+
 // Real-time Update API: receive player updates from individual users and broadcast them
 app.post("/api/sync/update", (req, res) => {
   const { username, currentSongId, isPlaying, progress, songTitle, songArtist, songCoverUrl } = req.body;
@@ -681,62 +732,73 @@ app.post("/api/smart/search", async (req, res) => {
   }
 
   const cleanQuery = query.trim();
-  const ilikeQuery = `%${cleanQuery}%`;
+  const words = cleanQuery.split(/\s+/).filter(w => w.length > 0);
 
   // ── Step 1: Search Neon DB first ──────────────────────────────────────────
-  // Layer A: Simple ILIKE — works without pg_trgm, guaranteed to find exact/partial matches
-  try {
-    const ilikeResult = await pool.query(`
-      SELECT * FROM songs
-      WHERE title ILIKE $1 OR artist ILIKE $1
-      ORDER BY
-        CASE
-          WHEN LOWER(title) = LOWER($2) THEN 0
-          WHEN title ILIKE $1            THEN 1
-          ELSE                                2
-        END,
-        title ASC
-      LIMIT $3
-    `, [ilikeQuery, cleanQuery, limit]);
+  if (words.length > 0) {
+    try {
+      const conditions: string[] = [];
+      const values: any[] = [];
+      words.forEach((word, idx) => {
+        conditions.push(`(title ILIKE $${idx + 1} OR artist ILIKE $${idx + 1})`);
+        values.push(`%${word}%`);
+      });
 
-    if (ilikeResult.rows.length > 0) {
-      // Layer B: Optional fuzzy re-rank using pg_trgm similarity (best-effort)
-      let rows = ilikeResult.rows;
-      try {
-        const fuzzyResult = await pool.query(`
-          SELECT *, (similarity(title, $1) + similarity(artist, $1)) AS rel
-          FROM songs
-          WHERE title ILIKE $2 OR artist ILIKE $2
-          ORDER BY rel DESC, title ASC
-          LIMIT $3
-        `, [cleanQuery, ilikeQuery, limit]);
-        if (fuzzyResult.rows.length > 0) rows = fuzzyResult.rows;
-      } catch (_fuzzyErr) {
-        // pg_trgm not available — ILIKE results are fine as-is
+      const limitParamIndex = words.length + 1;
+      values.push(limit);
+
+      const sql = `
+        SELECT * FROM songs
+        WHERE ${conditions.join(" AND ")}
+        LIMIT $${limitParamIndex}
+      `;
+
+      const dbResult = await pool.query(sql, values);
+
+      if (dbResult.rows.length > 0) {
+        let rows = [...dbResult.rows];
+        
+        // Sort results to prioritize exact phrase matches if any
+        const lowerQuery = cleanQuery.toLowerCase();
+        rows.sort((a, b) => {
+          const aTitle = a.title.toLowerCase();
+          const bTitle = b.title.toLowerCase();
+          const aArtist = a.artist.toLowerCase();
+          const bArtist = b.artist.toLowerCase();
+          
+          const aFullMatch = aTitle.includes(lowerQuery) || aArtist.includes(lowerQuery);
+          const bFullMatch = bTitle.includes(lowerQuery) || bArtist.includes(lowerQuery);
+          
+          if (aFullMatch && !bFullMatch) return -1;
+          if (!aFullMatch && bFullMatch) return 1;
+          
+          if (aTitle === lowerQuery) return -1;
+          if (bTitle === lowerQuery) return 1;
+          
+          return a.title.localeCompare(b.title);
+        });
+
+        const songs = rows.map((row: any) => ({
+          id: `yt_${row.video_id}`,
+          title: row.title,
+          artist: row.artist,
+          album: row.language ? `${row.language.toUpperCase()} Library` : "Cached",
+          duration: row.duration || "03:00",
+          durationSeconds: row.duration_seconds || 180,
+          genre: row.language || "Music",
+          mood: "Cached",
+          lyrics: "",
+          coverUrl: row.cover_url || `https://img.youtube.com/vi/${row.video_id}/hqdefault.jpg`,
+          videoId: row.video_id,
+          source: "youtube"
+        }));
+
+        console.log(`[Smart Search] ⚡ DB HIT: "${cleanQuery}" → ${songs.length} cached results`);
+        return res.json({ results: songs, source: "database", didYouMean: "" });
       }
-
-      const songs = rows.map((row: any) => ({
-        id: `yt_${row.video_id}`,
-        title: row.title,
-        artist: row.artist,
-        album: row.language ? `${row.language.toUpperCase()} Library` : "Cached",
-        duration: row.duration || "03:00",
-        durationSeconds: row.duration_seconds || 180,
-        genre: row.language || "Music",
-        mood: "Cached",
-        lyrics: "",
-        coverUrl: row.cover_url || `https://img.youtube.com/vi/${row.video_id}/hqdefault.jpg`,
-        videoId: row.video_id,
-        source: "youtube"
-      }));
-      console.log(`[Smart Search] ⚡ DB HIT: "${cleanQuery}" → ${songs.length} cached results`);
-      return res.json({ results: songs, source: "database", didYouMean: "" });
+    } catch (dbErr: any) {
+      console.error(`[Smart Search] ❌ DB ILIKE query failed for "${cleanQuery}": ${dbErr?.message}`);
     }
-  } catch (dbErr: any) {
-    // Log the REAL error so it's visible in server/Vercel logs
-    console.error(`[Smart Search] ❌ DB ILIKE query failed for "${cleanQuery}": ${dbErr?.message}`);
-    // Do NOT silently fall through — only go to YouTube if DB had a connection error
-    // (ILIKE never throws due to missing extensions, so this is a real connectivity failure)
   }
 
   // ── Step 2: DB miss → fetch from YouTube API ───────────────────────────────
@@ -1086,16 +1148,35 @@ app.post("/api/auth/google", async (req, res) => {
     };
 
     try {
-      const dbResult = await pool.query(`
-        INSERT INTO users (google_id, email, name, picture, last_login)
-        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-        ON CONFLICT (google_id) DO UPDATE
-        SET email = $2, name = $3, picture = $4, last_login = CURRENT_TIMESTAMP
-        RETURNING *;
-      `, [googleId, email, name, picture]);
+      // 1. Try to find the user by email first to avoid unique constraint conflict on email
+      const existingUserResult = await pool.query(
+        "SELECT * FROM users WHERE email = $1",
+        [email]
+      );
 
-      if (dbResult.rows.length > 0) {
-        user = dbResult.rows[0];
+      if (existingUserResult.rows.length > 0) {
+        // User exists with this email, update their google_id, name, picture, and last_login
+        const dbResult = await pool.query(`
+          UPDATE users
+          SET google_id = $1, name = $2, picture = $3, last_login = CURRENT_TIMESTAMP
+          WHERE email = $4
+          RETURNING *;
+        `, [googleId, name, picture, email]);
+        if (dbResult.rows.length > 0) {
+          user = dbResult.rows[0];
+        }
+      } else {
+        // User does not exist, insert them
+        const dbResult = await pool.query(`
+          INSERT INTO users (google_id, email, name, picture, last_login)
+          VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+          ON CONFLICT (google_id) DO UPDATE
+          SET email = $2, name = $3, picture = $4, last_login = CURRENT_TIMESTAMP
+          RETURNING *;
+        `, [googleId, email, name, picture]);
+        if (dbResult.rows.length > 0) {
+          user = dbResult.rows[0];
+        }
       }
       console.log(`[Google Auth] User successfully authenticated via DB: ${email} (${user.role})`);
     } catch (dbErr: any) {
@@ -1122,20 +1203,68 @@ app.get("/api/admin/metrics", async (req, res) => {
     let totalRegisteredUsers = 0;
     let registeredUsers: any[] = [];
     let totalSongs = allFallbackSongs.length;
+    let userListensDaily: any[] = [];
+    let userListensRecent: any[] = [];
 
     try {
       // 1. Get total registered users count
       const registeredCountResult = await pool.query("SELECT COUNT(*) FROM users");
       totalRegisteredUsers = parseInt(registeredCountResult.rows[0].count, 10);
 
-      // 2. Get registered users list
-      const usersResult = await pool.query("SELECT id, google_id, email, name, picture, role, created_at, last_login FROM users ORDER BY last_login DESC");
+      // 2. Get registered users list with today's listens count joined
+      const usersResult = await pool.query(`
+        SELECT 
+          u.id, 
+          u.google_id, 
+          u.email, 
+          u.name, 
+          u.picture, 
+          u.role, 
+          u.created_at, 
+          u.last_login,
+          COALESCE(ul.today_count, 0)::INT AS listens_today
+        FROM users u
+        LEFT JOIN (
+          SELECT user_id, COUNT(*)::INT AS today_count
+          FROM user_listens
+          WHERE listened_at >= CURRENT_DATE
+          GROUP BY user_id
+        ) ul ON u.id = ul.user_id
+        ORDER BY u.last_login DESC
+      `);
       registeredUsers = usersResult.rows;
 
       // 3. Get total cached songs count
       const songsCountResult = await pool.query("SELECT COUNT(*) FROM songs");
       totalSongs = parseInt(songsCountResult.rows[0].count, 10);
-    } catch (dbErr) {
+
+      // 4. Get 7-day daily song counts per user
+      const dailyListensResult = await pool.query(`
+        SELECT 
+          username,
+          TO_CHAR(listened_at, 'YYYY-MM-DD') AS date,
+          COUNT(*)::INT AS count
+        FROM user_listens
+        WHERE listened_at >= CURRENT_DATE - INTERVAL '6 days'
+        GROUP BY username, TO_CHAR(listened_at, 'YYYY-MM-DD')
+        ORDER BY username, date DESC
+      `);
+      userListensDaily = dailyListensResult.rows;
+
+      // 5. Get 7-day recent songs listened to per user
+      const recentListensResult = await pool.query(`
+        SELECT 
+          username,
+          song_title,
+          artist,
+          TO_CHAR(listened_at, 'YYYY-MM-DD HH24:MI:SS') AS timestamp
+        FROM user_listens
+        WHERE listened_at >= CURRENT_DATE - INTERVAL '6 days'
+        ORDER BY listened_at DESC
+        LIMIT 100
+      `);
+      userListensRecent = recentListensResult.rows;
+    } catch (dbErr: any) {
       console.warn("[Admin Metrics DB Warning] Using offline metrics fallback. Error:", dbErr.message);
       registeredUsers = [
         {
@@ -1146,13 +1275,22 @@ app.get("/api/admin/metrics", async (req, res) => {
           picture: "",
           role: "admin",
           created_at: new Date(),
-          last_login: new Date()
+          last_login: new Date(),
+          listens_today: 13
         }
       ];
       totalRegisteredUsers = registeredUsers.length;
+      userListensDaily = [
+        { username: "Aria Vance", date: new Date().toISOString().split('T')[0], count: 8 },
+        { username: "Julian Thorne", date: new Date().toISOString().split('T')[0], count: 5 }
+      ];
+      userListensRecent = [
+        { username: "Aria Vance", song_title: "Kesariya", artist: "Arijit Singh", timestamp: new Date().toISOString().replace('T', ' ').split('.')[0] },
+        { username: "Julian Thorne", song_title: "Midnight City", artist: "M83", timestamp: new Date().toISOString().replace('T', ' ').split('.')[0] }
+      ];
     }
 
-    // 4. Get active online users from ACTIVE_PLAYBACKS Map
+    // 6. Get active online users from ACTIVE_PLAYBACKS Map
     const activeUsers = Array.from(ACTIVE_PLAYBACKS.values());
     const activeUsersCount = activeUsers.length;
 
@@ -1162,9 +1300,11 @@ app.get("/api/admin/metrics", async (req, res) => {
       registeredUsers,
       totalSongs,
       activeUsersCount,
-      activeUsers
+      activeUsers,
+      userListensDaily,
+      userListensRecent
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("[Admin Metrics] General error retrieving metrics:", error);
     res.status(500).json({ error: "Internal server error retrieving metrics.", message: error.message });
   }
@@ -1182,10 +1322,15 @@ app.post("/api/admin/users/role", async (req, res) => {
     return res.status(400).json({ error: "userId and role are required." });
   }
 
+  const numericUserId = typeof userId === "string" ? parseInt(userId, 10) : userId;
+  if (isNaN(numericUserId)) {
+    return res.status(400).json({ error: "userId must be a valid number." });
+  }
+
     try {
       const dbResult = await pool.query(
         "UPDATE users SET role = $2 WHERE id = $1 RETURNING *",
-        [userId, role]
+        [numericUserId, role]
       );
 
       if (dbResult.rows.length === 0) {
@@ -1195,7 +1340,7 @@ app.post("/api/admin/users/role", async (req, res) => {
       res.json({ success: true, user: dbResult.rows[0] });
     } catch (error: any) {
       console.error("[Admin Users] Error updating role:", error);
-      if (userId === 9999 || String(userId) === "9999") {
+      if (numericUserId === 9999 || String(numericUserId) === "9999") {
         return res.json({ success: true, user: { id: 9999, email: "sky0wave01@gmail.com", name: "Mock Admin User (DB Offline)", role } });
       }
       res.status(500).json({ error: "Internal server error updating role.", message: error.message });
@@ -1214,10 +1359,15 @@ app.post("/api/admin/users/delete", async (req, res) => {
     return res.status(400).json({ error: "userId is required." });
   }
 
+  const numericUserId = typeof userId === "string" ? parseInt(userId, 10) : userId;
+  if (isNaN(numericUserId)) {
+    return res.status(400).json({ error: "userId must be a valid number." });
+  }
+
     try {
       const dbResult = await pool.query(
         "DELETE FROM users WHERE id = $1 RETURNING *",
-        [userId]
+        [numericUserId]
       );
 
       if (dbResult.rows.length === 0) {
@@ -1227,7 +1377,7 @@ app.post("/api/admin/users/delete", async (req, res) => {
       res.json({ success: true, message: "User deleted successfully.", user: dbResult.rows[0] });
     } catch (error: any) {
       console.error("[Admin Users] Error deleting user:", error);
-      if (userId === 9999 || String(userId) === "9999") {
+      if (numericUserId === 9999 || String(numericUserId) === "9999") {
         return res.json({ success: true, message: "Mock user deleted successfully (DB Offline)." });
       }
       res.status(500).json({ error: "Internal server error deleting user.", message: error.message });
@@ -1248,8 +1398,21 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    // Cache assets aggressively but prevent HTML caching to ensure users fetch the latest built CSS/JS index reference hashes
+    app.use(express.static(distPath, {
+      maxAge: '1y',
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.html')) {
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          res.setHeader('Pragma', 'no-cache');
+          res.setHeader('Expires', '0');
+        }
+      }
+    }));
     app.get('*', (req, res) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

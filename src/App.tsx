@@ -178,34 +178,36 @@ export default function App() {
     }
   }, []);
 
-  // Initialize Google Identity Services
+  // Initialize Google Identity Services once when script is loaded
   useEffect(() => {
-    const initGoogleGSI = () => {
-      if ((window as any).google) {
+    const interval = setInterval(() => {
+      if ((window as any).google?.accounts?.id && !(window as any).googleAccountsInitialized) {
         (window as any).google.accounts.id.initialize({
           client_id: GOOGLE_CLIENT_ID,
           callback: handleGoogleSignInResponse,
           auto_select: false
         });
-
-        const btnElem = document.getElementById("google-signin-btn");
-        if (btnElem) {
-          (window as any).google.accounts.id.renderButton(
-            btnElem,
-            { theme: "outline", size: "large", text: "signin_with" }
-          );
-        }
-      }
-    };
-
-    const interval = setInterval(() => {
-      if ((window as any).google) {
-        initGoogleGSI();
+        (window as any).googleAccountsInitialized = true;
+        clearInterval(interval);
+      } else if ((window as any).googleAccountsInitialized) {
         clearInterval(interval);
       }
     }, 500);
 
     return () => clearInterval(interval);
+  }, []);
+
+  // Render the Google sign-in button if not logged in and on profile tab
+  useEffect(() => {
+    if (activeTab === "profile" && !googleUser && (window as any).google?.accounts?.id) {
+      const btnElem = document.getElementById("google-signin-btn");
+      if (btnElem) {
+        (window as any).google.accounts.id.renderButton(
+          btnElem,
+          { theme: "outline", size: "large", text: "signin_with" }
+        );
+      }
+    }
   }, [activeTab, googleUser]);
 
 
@@ -301,6 +303,27 @@ export default function App() {
 
     return () => clearTimeout(selfSyncUpdateTimer.current);
   }, [username, currentSong, isPlaying, progress]);
+
+  // Submit listening history to database when a song starts playing or changes
+  const lastRecordedSongId = useRef<string>("");
+  useEffect(() => {
+    if (currentSong && isPlaying) {
+      if (progress === 0 || lastRecordedSongId.current !== currentSong.id) {
+        lastRecordedSongId.current = currentSong.id;
+        fetch("/api/listens", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: googleUser?.id || null,
+            username: googleUser?.name || username || "Guest",
+            songId: currentSong.id,
+            songTitle: currentSong.title,
+            artist: currentSong.artist
+          })
+        }).catch(err => console.warn("[Listens] Failed to submit listen count:", err));
+      }
+    }
+  }, [currentSong?.id, isPlaying, progress === 0, googleUser?.id, googleUser?.name, username]);
 
   // Server Sent Events (SSE) network registration: sync other users instantly
   useEffect(() => {

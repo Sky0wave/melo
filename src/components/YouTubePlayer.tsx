@@ -128,6 +128,7 @@ export function YouTubePlayer({
       currentVideoIdRef.current = videoId;
 
       playerRef.current = new window.YT.Player("yt-player-container", {
+        host: "https://www.youtube-nocookie.com",
         height: "1",
         width: "1",
         videoId: videoId,
