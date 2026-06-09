@@ -2,6 +2,7 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import { GoogleGenAI, Type } from "@google/genai";
+import loadedSongs from "./fallback_songs.json";
 import dotenv from "dotenv";
 import pg from "pg";
 import * as cheerio from "cheerio";
@@ -215,43 +216,38 @@ const PRESET_SONGS = [
   }
 ];
 
-// Dynamically load fallback songs from fallback_songs.json if available
+// Dynamically load fallback songs from fallback_songs.json
 let allFallbackSongs = [...PRESET_SONGS];
 try {
-  const fallbackPath = path.join(process.cwd(), "fallback_songs.json");
-  if (fs.existsSync(fallbackPath)) {
-    const fileContent = fs.readFileSync(fallbackPath, "utf-8");
-    const loadedSongs = JSON.parse(fileContent);
-    if (Array.isArray(loadedSongs)) {
-      // Map properties to match what the frontend expects
-      const formatted = loadedSongs.map((row: any) => ({
-        id: row.id || `yt_${row.video_id}`,
-        title: row.title,
-        artist: row.artist,
-        album: row.album || (row.language ? `${row.language.toUpperCase()} Library` : "Local Library"),
-        duration: row.duration || "03:00",
-        durationSeconds: row.duration_seconds || row.durationSeconds || 180,
-        genre: row.genre || row.language || "Music",
-        mood: row.mood || "Database Fallback",
-        lyrics: row.lyrics || "",
-        coverUrl: row.cover_url || row.coverUrl || `https://img.youtube.com/vi/${row.video_id}/hqdefault.jpg`,
-        videoId: row.video_id || row.videoId || "",
-        source: row.source || "youtube"
-      }));
-      
-      // Combine and filter out duplicates
-      const seenIds = new Set(PRESET_SONGS.map(s => s.id));
-      for (const song of formatted) {
-        if (!seenIds.has(song.id)) {
-          allFallbackSongs.push(song);
-          seenIds.add(song.id);
-        }
+  if (Array.isArray(loadedSongs)) {
+    // Map properties to match what the frontend expects
+    const formatted = loadedSongs.map((row: any) => ({
+      id: row.id || `yt_${row.video_id}`,
+      title: row.title,
+      artist: row.artist,
+      album: row.album || (row.language ? `${row.language.toUpperCase()} Library` : "Local Library"),
+      duration: row.duration || "03:00",
+      durationSeconds: row.duration_seconds || row.durationSeconds || 180,
+      genre: row.genre || row.language || "Music",
+      mood: row.mood || "Database Fallback",
+      lyrics: row.lyrics || "",
+      coverUrl: row.cover_url || row.coverUrl || `https://img.youtube.com/vi/${row.video_id}/hqdefault.jpg`,
+      videoId: row.video_id || row.videoId || "",
+      source: row.source || "youtube"
+    }));
+    
+    // Combine and filter out duplicates
+    const seenIds = new Set(PRESET_SONGS.map(s => s.id));
+    for (const song of formatted) {
+      if (!seenIds.has(song.id)) {
+        allFallbackSongs.push(song);
+        seenIds.add(song.id);
       }
-      console.log(`Loaded ${formatted.length} fallback songs from fallback_songs.json (Total offline: ${allFallbackSongs.length})`);
     }
+    console.log(`Loaded ${formatted.length} fallback songs (Total offline: ${allFallbackSongs.length})`);
   }
 } catch (err: any) {
-  console.error("Failed to load fallback_songs.json:", err.message);
+  console.error("Failed to load fallback songs:", err.message);
 }
 
 // Active synchronization database (stores active listening clients)
