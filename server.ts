@@ -790,7 +790,19 @@ app.post("/api/db/search", async (req, res) => {
     }));
 
     console.log(`[DB Search] "${cleanQuery}" → ${songs.length} results. Spelling suggestion: "${didYouMean}"`);
-    res.json({ results: songs, didYouMean });
+    
+    // If DB returned results, serve them
+    if (songs.length > 0) {
+      return res.json({ results: songs, didYouMean });
+    }
+    
+    // DB online but 0 rows — also search in-memory allFallbackSongs (catches songs cached in this session)
+    const lowercaseQuery2 = cleanQuery.toLowerCase();
+    const memResults = allFallbackSongs.filter(song =>
+      song.title.toLowerCase().includes(lowercaseQuery2) ||
+      song.artist.toLowerCase().includes(lowercaseQuery2)
+    ).slice(0, Number(limit) || 20);
+    res.json({ results: memResults, didYouMean });
   } catch (error) {
     console.error("Local DB search query failed, falling back to presets:", error);
     // Fallback to searching allFallbackSongs
@@ -999,6 +1011,15 @@ app.post("/api/youtube/search", async (req, res) => {
     });
 
     if (songs.length > 0) {
+      // Push new songs into allFallbackSongs in-memory so DB search finds them in this process
+      const seenIds = new Set(allFallbackSongs.map(s => s.id));
+      for (const song of songs) {
+        if (!seenIds.has(song.id)) {
+          allFallbackSongs.push(song);
+          seenIds.add(song.id);
+        }
+      }
+
       try {
         const values: any[] = [];
         const placeholders: string[] = [];

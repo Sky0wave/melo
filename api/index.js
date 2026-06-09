@@ -3904,7 +3904,14 @@ app.post("/api/db/search", async (req, res) => {
       source: "youtube"
     }));
     console.log(`[DB Search] "${cleanQuery}" \u2192 ${songs.length} results. Spelling suggestion: "${didYouMean}"`);
-    res.json({ results: songs, didYouMean });
+    if (songs.length > 0) {
+      return res.json({ results: songs, didYouMean });
+    }
+    const lowercaseQuery2 = cleanQuery.toLowerCase();
+    const memResults = allFallbackSongs.filter(
+      (song) => song.title.toLowerCase().includes(lowercaseQuery2) || song.artist.toLowerCase().includes(lowercaseQuery2)
+    ).slice(0, Number(limit) || 20);
+    res.json({ results: memResults, didYouMean });
   } catch (error) {
     console.error("Local DB search query failed, falling back to presets:", error);
     const lowercaseQuery = (query || "").toLowerCase();
@@ -4070,6 +4077,13 @@ app.post("/api/youtube/search", async (req, res) => {
       };
     });
     if (songs.length > 0) {
+      const seenIds = new Set(allFallbackSongs.map((s) => s.id));
+      for (const song of songs) {
+        if (!seenIds.has(song.id)) {
+          allFallbackSongs.push(song);
+          seenIds.add(song.id);
+        }
+      }
       try {
         const values = [];
         const placeholders = [];
