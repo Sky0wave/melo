@@ -1211,7 +1211,7 @@ app.get("/api/admin/metrics", async (req, res) => {
       const registeredCountResult = await pool.query("SELECT COUNT(*) FROM users");
       totalRegisteredUsers = parseInt(registeredCountResult.rows[0].count, 10);
 
-      // 2. Get registered users list with today's listens count joined
+      // 2. Get registered users list with today's listens and total listens count joined
       const usersResult = await pool.query(`
         SELECT 
           u.id, 
@@ -1222,14 +1222,20 @@ app.get("/api/admin/metrics", async (req, res) => {
           u.role, 
           u.created_at, 
           u.last_login,
-          COALESCE(ul.today_count, 0)::INT AS listens_today
+          COALESCE(ul_today.today_count, 0)::INT AS listens_today,
+          COALESCE(ul_all.total_count, 0)::INT AS listens_total
         FROM users u
         LEFT JOIN (
           SELECT user_id, COUNT(*)::INT AS today_count
           FROM user_listens
           WHERE listened_at >= CURRENT_DATE
           GROUP BY user_id
-        ) ul ON u.id = ul.user_id
+        ) ul_today ON u.id = ul_today.user_id
+        LEFT JOIN (
+          SELECT user_id, COUNT(*)::INT AS total_count
+          FROM user_listens
+          GROUP BY user_id
+        ) ul_all ON u.id = ul_all.user_id
         ORDER BY u.last_login DESC
       `);
       registeredUsers = usersResult.rows;
@@ -1276,7 +1282,8 @@ app.get("/api/admin/metrics", async (req, res) => {
           role: "admin",
           created_at: new Date(),
           last_login: new Date(),
-          listens_today: 13
+          listens_today: 13,
+          listens_total: 154
         }
       ];
       totalRegisteredUsers = registeredUsers.length;

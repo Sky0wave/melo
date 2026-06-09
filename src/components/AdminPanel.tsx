@@ -19,6 +19,7 @@ interface RegisteredUser {
   created_at: string;
   last_login: string;
   listens_today?: number;
+  listens_total?: number;
 }
 
 interface ActiveUser {
@@ -456,13 +457,14 @@ export function AdminPanel({
                     <th className="p-4">Joined</th>
                     <th className="p-4">Last Login</th>
                     <th className="p-4">Listens Today</th>
+                    <th className="p-4">Total Plays</th>
                     <th className="p-4 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5 text-[11px] font-sans">
                   {metrics?.registeredUsers.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="p-8 text-center text-white/30 italic">
+                      <td colSpan={9} className="p-8 text-center text-white/30 italic">
                         No Google authenticated users found in the database.
                       </td>
                     </tr>
@@ -512,6 +514,11 @@ export function AdminPanel({
                         <td className="p-4 text-white/70 font-mono text-[10px]">
                           <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[9px] font-bold">
                             {user.listens_today || 0} tracks
+                          </span>
+                        </td>
+                        <td className="p-4 text-white/70 font-mono text-[10px]">
+                          <span className="px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 text-[9px] font-bold">
+                            {user.listens_total || 0} tracks
                           </span>
                         </td>
                         <td className="p-4 text-right space-x-1.5">
