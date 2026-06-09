@@ -63,6 +63,12 @@ export function AdminPanel({
   setIsAdminUnlocked,
   currentUsername
 }: AdminPanelProps) {
+  const [metrics, setMetrics] = useState<Metrics | null>(null);
+  const [passwordInput, setPasswordInput] = useState(adminPassword);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<"users" | "active" | "history">("users");
+
   const getTodayString = () => {
     const d = new Date();
     const year = d.getFullYear();
@@ -77,12 +83,6 @@ export function AdminPanel({
         .filter((item) => item.date === todayStr)
         .reduce((sum, item) => sum + item.count, 0)
     : 0;
-
-  const [passwordInput, setPasswordInput] = useState(adminPassword);
-  const [errorMsg, setErrorMsg] = useState("");
-  const [metrics, setMetrics] = useState<Metrics | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<"users" | "active" | "history">("users");
 
   const fetchMetrics = async (pwd: string) => {
     setIsLoading(true);
