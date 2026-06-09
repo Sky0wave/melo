@@ -9,13 +9,13 @@ import * as cheerio from "cheerio";
 
 dotenv.config();
 
-// PostgreSQL pool — tuned for Neon serverless (longer timeouts, keepAlive)
+// PostgreSQL pool — tuned for Neon serverless (generous timeouts)
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 3,                          // small pool for serverless
-  min: 0,                          // don't hold idle connections
-  connectionTimeoutMillis: 10000,  // Neon SSL handshake can take 3-5s
-  idleTimeoutMillis: 30000,        // keep connections alive longer
+  max: 3,
+  min: 0,
+  connectionTimeoutMillis: 20000,  // Neon SSL handshake can take up to 17s on cold start
+  idleTimeoutMillis: 30000,
   allowExitOnIdle: true,
   ssl: process.env.DATABASE_URL?.includes('neon.tech') ? { rejectUnauthorized: false } : false
 });
@@ -23,6 +23,12 @@ const pool = new pg.Pool({
 pool.on("error", (err) => {
   console.error("[DB Pool] Unexpected idle client error:", err.message);
 });
+
+// Warm up the pool immediately at server start so the first search request
+// doesn't wait for a cold SSL handshake (~9-17s on Neon).
+pool.query("SELECT 1")
+  .then(() => console.log("[DB Pool] ✅ Connection warm — ready for searches"))
+  .catch((e) => console.warn("[DB Pool] ⚠️ Warm-up failed (will retry on first request):", e.message));
 
 // ── Robust DB cache writer ───────────────────────────────────────────────────
 // Used by every search route. Retries once on transient errors, logs clearly.
@@ -473,114 +479,8 @@ app.get("/api/sync/stream", (req, res) => {
 });
 
 // Dynamic AI Song Search: uses Gemini to query any song in the world
-app.post("/api/search", async (req, res) => {
-  const { query, mood, artist, genre } = req.body;
-  const filterText = [
-    query && `Search Query: "${query}"`,
-    mood && `Mood: "${mood}"`,
-    artist && `Artist: "${artist}"`,
-    genre && `Genre: "${genre}"`
-  ].filter(Boolean).join(", ");
-
-  if (!filterText) {
-    return res.json(allFallbackSongs);
-  }
-
-  // First do local fuzzy search within pre-curated songs
-  const lowercaseQuery = (query || "").toLowerCase();
-  const lowercaseMood = (mood || "").toLowerCase();
-  const lowercaseArtist = (artist || "").toLowerCase();
-  const lowercaseGenre = (genre || "").toLowerCase();
-
-  const matchedPresets = allFallbackSongs.filter(song => {
-    return (
-      (lowercaseQuery && (song.title.toLowerCase().includes(lowercaseQuery) || song.artist.toLowerCase().includes(lowercaseQuery) || (song.album && song.album.toLowerCase().includes(lowercaseQuery)))) ||
-      (lowercaseMood && song.mood.toLowerCase().includes(lowercaseMood)) ||
-      (lowercaseArtist && song.artist.toLowerCase().includes(lowercaseArtist)) ||
-      (lowercaseGenre && song.genre.toLowerCase().includes(lowercaseGenre))
-    );
-  });
-
-  // If we match presets, prioritize returning them. If there's no model setup or a mismatch, fallback to matches or generated ones.
-  if (!ai) {
-    console.log("No Gemini API Key found. Returning local matches/presets.");
-    return res.json(matchedPresets.length > 0 ? matchedPresets : allFallbackSongs);
-  }
-
-  try {
-    const prompt = `You are the backend metadata model for Mulberry Sound. 
-Given these search filters: ${filterText}.
-Create a list of exactly 6 real, actual songs that match the criteria perfectly. Ensure you include:
-- Realistic title, artist, and album.
-- Actual lyrics (extract or produce high-fidelity full lyrics of at least 8 lines).
-- Precise duration in "MM:SS" format and the equivalent durationSeconds.
-- Realistic description of the song's specific mood under our "Deep Mulberry" design parameters.
-- High-quality cover art: choose an elegant design link or specify a custom high-gloss asset representation. Since we use beautiful curated abstract URLs, generate realistic simulated covers or select matching ones (or fallback color themes).
-
-You must respond ONLY with a clean JSON array of song objects. DO NOT wrap with markdown code blocks except possibly json tags.
-
-JSON Schema format:
-[
-  {
-    "id": "unique-slug-id",
-    "title": "Song Title",
-    "artist": "Artist Name",
-    "album": "Album Name",
-    "duration": "04:12",
-    "durationSeconds": 252,
-    "genre": "Genre Name",
-    "mood": "Mood keywords matching Mulberry Sound Luxury theme",
-    "lyrics": "Full stylized lyrics...",
-    "coverUrl": "https://images.unsplash.com/photo-... (use elegant abstract music or texture photography)"
-  }
-]`;
-
-    const response = await generateContentWithRetry(ai, {
-      model: "gemini-2.5-flash-lite",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              id: { type: Type.STRING },
-              title: { type: Type.STRING },
-              artist: { type: Type.STRING },
-              album: { type: Type.STRING },
-              duration: { type: Type.STRING },
-              durationSeconds: { type: Type.INTEGER },
-              genre: { type: Type.STRING },
-              mood: { type: Type.STRING },
-              lyrics: { type: Type.STRING },
-              coverUrl: { type: Type.STRING }
-            },
-            required: ["id", "title", "artist", "album", "duration", "durationSeconds", "genre", "mood", "lyrics", "coverUrl"]
-          }
-        }
-      }
-    });
-
-    const parsedResults = JSON.parse(response.text || "[]");
-    
-    // Inject a few local preset songs at the top if they are highly relevant
-    const combinedResults = [...matchedPresets, ...parsedResults];
-    // Squeeze duplicates
-    const uniqueIds = new Set<string>();
-    const finishedList = combinedResults.filter(item => {
-      if (uniqueIds.has(item.id)) return false;
-      uniqueIds.add(item.id);
-      return true;
-    });
-
-    res.json(finishedList.length > 0 ? finishedList : allFallbackSongs);
-  } catch (error) {
-    console.error("Gemini song search extraction failed:", error);
-    // In case of error or quota limits, return fuzzy filter presets
-    res.json(matchedPresets.length > 0 ? matchedPresets : allFallbackSongs);
-  }
-});
+// NOTE: /api/search (legacy Gemini search) has been removed.
+// All searches now use /api/smart/search: DB-first → YouTube fallback → auto-cache.
 
 // Helper to fetch and scrape lyrics from Genius API
 async function fetchGeniusLyrics(title: string, artist: string): Promise<string> {
@@ -764,255 +664,9 @@ Rules:
 }
 
 // Local Database search endpoint — queries local PostgreSQL database
-app.post("/api/db/search", async (req, res) => {
-  const { query, limit = 100, language } = req.body;
-
-  if (!query || !query.trim()) {
-    return res.json({ results: [], didYouMean: "" });
-  }
-
-  try {
-    const cleanQuery = query.trim();
-    const ilikeQuery = `%${cleanQuery}%`;
-    
-    let sql = `
-      SELECT *, 
-             (similarity(title, $1) + similarity(artist, $1)) as rel
-      FROM songs
-      WHERE (title ILIKE $2 OR artist ILIKE $2 OR title % $1 OR artist % $1)
-    `;
-    const params: any[] = [cleanQuery, ilikeQuery];
-
-    if (language) {
-      sql += ` AND language = $3`;
-      params.push(language.toLowerCase());
-    }
-
-    sql += ` ORDER BY rel DESC, title ASC LIMIT $${params.length + 1}`;
-    params.push(limit);
-
-    // Run search query and spelling correction in parallel
-    const [dbResults, didYouMean] = await Promise.all([
-      pool.query(sql, params),
-      getSpellingCorrection(cleanQuery)
-    ]);
-
-    const songs = dbResults.rows.map((row: any) => ({
-      id: `yt_${row.video_id}`,
-      title: row.title,
-      artist: row.artist,
-      album: row.language ? `${row.language.toUpperCase()} Library` : "Local Library",
-      duration: row.duration || "03:00",
-      durationSeconds: row.duration_seconds || 180,
-      genre: row.language || "Music",
-      mood: "Database",
-      lyrics: "",
-      coverUrl: row.cover_url || `https://img.youtube.com/vi/${row.video_id}/hqdefault.jpg`,
-      videoId: row.video_id,
-      source: "youtube"
-    }));
-
-    console.log(`[DB Search] "${cleanQuery}" → ${songs.length} results. Spelling suggestion: "${didYouMean}"`);
-    
-    // If DB returned results, serve them
-    if (songs.length > 0) {
-      return res.json({ results: songs, didYouMean });
-    }
-    
-    // DB online but 0 rows — also search in-memory allFallbackSongs (catches songs cached in this session)
-    const lowercaseQuery2 = cleanQuery.toLowerCase();
-    const memResults = allFallbackSongs.filter(song =>
-      song.title.toLowerCase().includes(lowercaseQuery2) ||
-      song.artist.toLowerCase().includes(lowercaseQuery2)
-    ).slice(0, Number(limit) || 20);
-    res.json({ results: memResults, didYouMean });
-  } catch (error) {
-    console.error("Local DB search query failed, falling back to presets:", error);
-    // Fallback to searching allFallbackSongs
-    const lowercaseQuery = (query || "").toLowerCase();
-    const matchedPresets = allFallbackSongs.filter(song => {
-      return (
-        song.title.toLowerCase().includes(lowercaseQuery) ||
-        song.artist.toLowerCase().includes(lowercaseQuery) ||
-        (song.album && song.album.toLowerCase().includes(lowercaseQuery))
-      );
-    }).slice(0, Number(limit) || 20);
-    res.json({ results: matchedPresets, didYouMean: "" });
-  }
-});
-
-// YouTube search fallback when API key is missing or request fails
-async function handleYoutubeSearchFallback(query: string, maxResults: number, res: any) {
-  try {
-    const cleanQuery = query.trim();
-    const ilikeQuery = `%${cleanQuery}%`;
-    const dbResults = await pool.query(`
-      SELECT * FROM songs
-      WHERE (title ILIKE $2 OR artist ILIKE $2)
-      LIMIT $3
-    `, [cleanQuery, ilikeQuery, maxResults]);
-    
-    if (dbResults.rows.length > 0) {
-      const songs = dbResults.rows.map((row: any) => ({
-        id: `yt_${row.video_id}`,
-        title: row.title,
-        artist: row.artist,
-        album: row.language ? `${row.language.toUpperCase()} Library` : "Local Library",
-        duration: row.duration || "03:00",
-        durationSeconds: row.duration_seconds || 180,
-        genre: row.language || "Music",
-        mood: "Database",
-        lyrics: "",
-        coverUrl: row.cover_url || `https://img.youtube.com/vi/${row.video_id}/hqdefault.jpg`,
-        videoId: row.video_id,
-        source: "youtube"
-      }));
-      return res.json({ results: songs, didYouMean: "" });
-    }
-  } catch (dbErr) {
-    console.warn("[YouTube Search Fallback] Database offline, using presets");
-  }
-
-  const lowercaseQuery = (query || "").toLowerCase();
-  const matchedPresets = allFallbackSongs.filter(song => {
-    return (
-      song.title.toLowerCase().includes(lowercaseQuery) ||
-      song.artist.toLowerCase().includes(lowercaseQuery) ||
-      (song.album && song.album.toLowerCase().includes(lowercaseQuery))
-    );
-  }).slice(0, maxResults);
-  return res.json({ results: matchedPresets, didYouMean: "" });
-}
-
-// YouTube search endpoint — proxies requests to YouTube Data API v3
-app.post("/api/youtube/search", async (req, res) => {
-  const { query, maxResults = 50 } = req.body;
-
-  if (!query || !query.trim()) {
-    return res.status(400).json({ error: "Search query is required" });
-  }
-
-  if (!YOUTUBE_API_KEY) {
-    console.warn("YOUTUBE_API_KEY is not configured in .env. Falling back to local search.");
-    return handleYoutubeSearchFallback(query, maxResults, res);
-  }
-
-  const cacheKey = `yt_search:${query.trim().toLowerCase()}:${maxResults}`;
-  const cached = getCachedResult(cacheKey);
-  if (cached) {
-    console.log(`[YouTube Cache HIT] "${query}"`);
-    if (Array.isArray(cached)) {
-      return res.json({ results: cached, didYouMean: "" });
-    }
-    return res.json(cached);
-  }
-
-  // Start spelling correction check in parallel with the YouTube fetch
-  const didYouMeanPromise = getSpellingCorrection(query.trim());
-
-  // NOTE: YouTube Stream mode always hits the real YouTube API so fresh results
-  // are fetched and cached to the database every time. The DB-first shortcut
-  // is intentionally removed here — use Library DB mode to search cached data.
-
-  try {
-    const searchUrl = new URL("https://www.googleapis.com/youtube/v3/search");
-    searchUrl.searchParams.set("part", "snippet");
-    searchUrl.searchParams.set("q", query);
-    searchUrl.searchParams.set("type", "video");
-    searchUrl.searchParams.set("videoCategoryId", "10"); // Music
-    searchUrl.searchParams.set("maxResults", String(maxResults));
-    searchUrl.searchParams.set("key", YOUTUBE_API_KEY);
-
-    const ytResponse = await fetch(searchUrl.toString());
-    if (!ytResponse.ok) {
-      const errorBody = await ytResponse.text();
-      console.error("YouTube API error:", ytResponse.status, errorBody);
-      return res.status(ytResponse.status).json({ error: "YouTube API request failed", details: errorBody });
-    }
-
-    const ytData = await ytResponse.json();
-
-    // Extract video IDs for batch duration lookup
-    const videoIds = (ytData.items || [])
-      .map((item: any) => item.id?.videoId)
-      .filter(Boolean);
-
-    // Fetch durations in a single batch call
-    let durationsMap: Record<string, { duration: string; durationSeconds: number }> = {};
-    if (videoIds.length > 0) {
-      try {
-        const detailsUrl = new URL("https://www.googleapis.com/youtube/v3/videos");
-        detailsUrl.searchParams.set("part", "contentDetails");
-        detailsUrl.searchParams.set("id", videoIds.join(","));
-        detailsUrl.searchParams.set("key", YOUTUBE_API_KEY);
-
-        const detailsResponse = await fetch(detailsUrl.toString());
-        if (detailsResponse.ok) {
-          const detailsData = await detailsResponse.json();
-          for (const item of (detailsData.items || [])) {
-            const iso = item.contentDetails?.duration || "PT0S";
-            const secs = parseISO8601Duration(iso);
-            durationsMap[item.id] = {
-              duration: formatDuration(secs),
-              durationSeconds: secs
-            };
-          }
-        }
-      } catch (dErr) {
-        console.warn("Failed to fetch video durations:", dErr);
-      }
-    }
-
-    // Normalize to Song interface shape
-    const songs = (ytData.items || []).map((item: any) => {
-      const videoId = item.id?.videoId || "";
-      const snippet = item.snippet || {};
-      const dur = durationsMap[videoId] || { duration: "—", durationSeconds: 300 };
-
-      return {
-        id: `yt_${videoId}`,
-        title: decodeHTMLEntities(snippet.title || "Unknown Title"),
-        artist: decodeHTMLEntities(snippet.channelTitle || "Unknown Artist"),
-        album: "YouTube",
-        duration: dur.duration,
-        durationSeconds: dur.durationSeconds,
-        genre: "YouTube Music",
-        mood: "Streaming",
-        lyrics: "",
-        coverUrl: snippet.thumbnails?.high?.url || snippet.thumbnails?.medium?.url || snippet.thumbnails?.default?.url || "",
-        videoId: videoId,
-        source: "youtube"
-      };
-    });
-
-    // Only keep songs with a valid YouTube video ID — empty/missing IDs cause
-    // all such rows to collapse into one DB row via the UNIQUE constraint DO UPDATE.
-    const validSongs = songs.filter((s: any) => s.videoId && s.videoId.trim().length > 0);
-
-    if (validSongs.length > 0) {
-      // Push new songs into allFallbackSongs in-memory so DB search finds them in this process
-      const seenIds = new Set(allFallbackSongs.map(s => s.id));
-      for (const song of validSongs) {
-        if (!seenIds.has(song.id)) {
-          allFallbackSongs.push(song);
-          seenIds.add(song.id);
-        }
-      }
-
-      // Use the shared cacheToDb helper — handles retries, logging, filtering
-      cacheToDb(songs).catch(e => console.error("[YT Search] cacheToDb failed:", e?.message));
-    }
-
-    const didYouMean = await didYouMeanPromise;
-    const responseObj = { results: songs, didYouMean };
-    setCachedResult(cacheKey, responseObj);
-    console.log(`[YouTube Search] "${query}" → ${songs.length} results. Spelling suggestion: "${didYouMean}"`);
-    res.json(responseObj);
-  } catch (error) {
-    console.error("YouTube search proxy failed, falling back to local search:", error);
-    return handleYoutubeSearchFallback(query, maxResults, res);
-  }
-});
+// NOTE: /api/db/search and /api/youtube/search have been removed.
+// Use /api/smart/search — it searches DB first, falls back to YouTube if
+// not cached, writes all results to Neon, and returns DB results next time.
 
 // ── Smart Search: DB-first → YouTube fallback → auto-cache ───────────────────
 // Flow:
@@ -1030,18 +684,38 @@ app.post("/api/smart/search", async (req, res) => {
   const ilikeQuery = `%${cleanQuery}%`;
 
   // ── Step 1: Search Neon DB first ──────────────────────────────────────────
+  // Layer A: Simple ILIKE — works without pg_trgm, guaranteed to find exact/partial matches
   try {
-    const dbResult = await pool.query(`
-      SELECT *,
-             (similarity(title, $1) + similarity(artist, $1)) AS rel
-      FROM songs
-      WHERE (title ILIKE $2 OR artist ILIKE $2 OR title % $1 OR artist % $1)
-      ORDER BY rel DESC, title ASC
+    const ilikeResult = await pool.query(`
+      SELECT * FROM songs
+      WHERE title ILIKE $1 OR artist ILIKE $1
+      ORDER BY
+        CASE
+          WHEN LOWER(title) = LOWER($2) THEN 0
+          WHEN title ILIKE $1            THEN 1
+          ELSE                                2
+        END,
+        title ASC
       LIMIT $3
-    `, [cleanQuery, ilikeQuery, limit]);
+    `, [ilikeQuery, cleanQuery, limit]);
 
-    if (dbResult.rows.length > 0) {
-      const songs = dbResult.rows.map((row: any) => ({
+    if (ilikeResult.rows.length > 0) {
+      // Layer B: Optional fuzzy re-rank using pg_trgm similarity (best-effort)
+      let rows = ilikeResult.rows;
+      try {
+        const fuzzyResult = await pool.query(`
+          SELECT *, (similarity(title, $1) + similarity(artist, $1)) AS rel
+          FROM songs
+          WHERE title ILIKE $2 OR artist ILIKE $2
+          ORDER BY rel DESC, title ASC
+          LIMIT $3
+        `, [cleanQuery, ilikeQuery, limit]);
+        if (fuzzyResult.rows.length > 0) rows = fuzzyResult.rows;
+      } catch (_fuzzyErr) {
+        // pg_trgm not available — ILIKE results are fine as-is
+      }
+
+      const songs = rows.map((row: any) => ({
         id: `yt_${row.video_id}`,
         title: row.title,
         artist: row.artist,
@@ -1059,8 +733,10 @@ app.post("/api/smart/search", async (req, res) => {
       return res.json({ results: songs, source: "database", didYouMean: "" });
     }
   } catch (dbErr: any) {
-    console.error("[Smart Search] DB lookup error:", dbErr?.message);
-    // Continue to YouTube even if DB is unreachable
+    // Log the REAL error so it's visible in server/Vercel logs
+    console.error(`[Smart Search] ❌ DB ILIKE query failed for "${cleanQuery}": ${dbErr?.message}`);
+    // Do NOT silently fall through — only go to YouTube if DB had a connection error
+    // (ILIKE never throws due to missing extensions, so this is a real connectivity failure)
   }
 
   // ── Step 2: DB miss → fetch from YouTube API ───────────────────────────────
@@ -1139,34 +815,12 @@ app.post("/api/smart/search", async (req, res) => {
         if (!seenIds.has(song.id)) { allFallbackSongs.push(song); seenIds.add(song.id); }
       }
 
-      const values: any[] = [];
-      const placeholders: string[] = [];
-      let pi = 0;
-      const hindiKw = ["tum","kesariya","dil","pyar","aashiqui","singh","dosanjh","pasoori","arijit",
-                       "jubin","sonu","lata","atif","tere","rabba","sanam","bollywood","t-series"];
-      for (const song of validSongs) {
-        const base = pi * 7;
-        placeholders.push(`($${base+1},$${base+2},$${base+3},$${base+4},$${base+5},$${base+6},$${base+7})`);
-        const tl = (song.title + " " + song.artist).toLowerCase();
-        const lang = (/[^\x00-\x7F]/.test(song.title) || hindiKw.some(k => tl.includes(k))) ? "hindi" : "english";
-        values.push(song.videoId, song.title, song.artist, song.duration || "03:00", song.durationSeconds || 180, song.coverUrl || "", lang);
-        pi++;
-      }
-
-      // Async — don't block the HTTP response
-      pool.query(`
-        INSERT INTO songs (video_id, title, artist, duration, duration_seconds, cover_url, language)
-        VALUES ${placeholders.join(",")}
-        ON CONFLICT (video_id) DO UPDATE
-          SET title=EXCLUDED.title, artist=EXCLUDED.artist,
-              duration=EXCLUDED.duration, duration_seconds=EXCLUDED.duration_seconds,
-              cover_url=EXCLUDED.cover_url, language=EXCLUDED.language
-      `, values)
-      .then(() => console.log(`[Smart Search] 💾 Cached ${validSongs.length} songs to Neon — next search will be instant`))
-      .catch((e: any) => console.error("[Smart Search] Cache write failed:", e?.message));
+      // Await before responding — Vercel kills lambdas immediately after res.json()
+      // so fire-and-forget writes never complete on serverless
+      await cacheToDb(validSongs);
     }
 
-    console.log(`[Smart Search] 🔴 YouTube LIVE: "${cleanQuery}" → ${ytSongs.length} results`);
+    console.log(`[Smart Search] 🔴 YouTube LIVE: "${cleanQuery}" → ${ytSongs.length} results — cached to Neon`);
     return res.json({ results: ytSongs, source: "youtube", didYouMean: "" });
 
   } catch (ytErr: any) {

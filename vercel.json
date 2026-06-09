@@ -7,6 +7,7 @@
     }
   ],
   "env": {
+    "DATABASE_URL": "postgresql://neondb_owner:npg_CkhN1c0LuzUD@ep-plain-river-aqgzx5dh.c-8.us-east-1.aws.neon.tech/neondb?sslmode=require",
     "YOUTUBE_API_KEY": "AIzaSyC4sVtmuCW0uCAQQcoH4RT8VwcbbLjL8zE",
     "GEMINI_API_KEY": "AIzaSyCQjG_xL53wI6Z09mepu10fmuc-kmMJpzY",
     "GENIUS_ACCESS_TOKEN": "xmvRV1yiBYz5xQTMevfcGl-_udqykklpcupf0qDZHdfBeG0BcXJ4LSk8E9kQFuUI",
