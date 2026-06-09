@@ -1060,6 +1060,159 @@ You must respond ONLY in a clean JSON format matching this schema:
   }
 });
 
+// ── Google Auth & Admin API endpoints ─────────────────────────
+
+// Google auth callback endpoint
+app.post("/api/auth/google", async (req, res) => {
+  const { credential } = req.body;
+  if (!credential) {
+    return res.status(400).json({ error: "Google credentials (id_token) is required." });
+  }
+
+  try {
+    // 1. Verify credential via Google's tokeninfo API
+    const tokenInfoUrl = `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`;
+    const response = await fetch(tokenInfoUrl);
+    
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error("[Google Auth] tokeninfo verification failed:", errText);
+      return res.status(401).json({ error: "Invalid Google credential.", details: errText });
+    }
+
+    const payload: any = await response.json();
+    const googleId = payload.sub;
+    const email = payload.email;
+    const name = payload.name || email.split("@")[0];
+    const picture = payload.picture || "";
+    const aud = payload.aud; // Audience of the token
+
+    // 2. Validate audience contains the project number 950921906220
+    const projectNumber = "950921906220";
+    if (!aud || !aud.includes(projectNumber)) {
+      console.warn(`[Google Auth] Audience mismatch: expected client ID to contain project number ${projectNumber}, but got ${aud}`);
+      return res.status(403).json({ error: "Unauthorized Google Project token." });
+    }
+
+    // 3. Upsert user in database
+    const dbResult = await pool.query(`
+      INSERT INTO users (google_id, email, name, picture, last_login)
+      VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+      ON CONFLICT (google_id) DO UPDATE
+      SET email = $2, name = $3, picture = $4, last_login = CURRENT_TIMESTAMP
+      RETURNING *;
+    `, [googleId, email, name, picture]);
+
+    const user = dbResult.rows[0];
+    console.log(`[Google Auth] User successfully authenticated: ${email} (${user.role})`);
+    
+    res.json({ success: true, user });
+  } catch (error: any) {
+    console.error("[Google Auth] Error in authentication pipeline:", error);
+    res.status(500).json({ error: "Internal server error during authentication.", message: error.message });
+  }
+});
+
+// Admin metrics endpoint
+app.get("/api/admin/metrics", async (req, res) => {
+  const adminPasswordHeader = req.headers["x-admin-password"];
+  
+  // Accept "mulbeery" and "mulberry" to handle spelling variations robustly
+  if (adminPasswordHeader !== "mulbeery" && adminPasswordHeader !== "mulberry") {
+    return res.status(401).json({ error: "Unauthorized. Invalid admin password." });
+  }
+
+  try {
+    // 1. Get total registered users count
+    const registeredCountResult = await pool.query("SELECT COUNT(*) FROM users");
+    const totalRegisteredUsers = parseInt(registeredCountResult.rows[0].count, 10);
+
+    // 2. Get registered users list
+    const usersResult = await pool.query("SELECT id, google_id, email, name, picture, role, created_at, last_login FROM users ORDER BY last_login DESC");
+    const registeredUsers = usersResult.rows;
+
+    // 3. Get total cached songs count
+    const songsCountResult = await pool.query("SELECT COUNT(*) FROM songs");
+    const totalSongs = parseInt(songsCountResult.rows[0].count, 10);
+
+    // 4. Get active online users from ACTIVE_PLAYBACKS Map
+    const activeUsers = Array.from(ACTIVE_PLAYBACKS.values());
+    const activeUsersCount = activeUsers.length;
+
+    res.json({
+      success: true,
+      totalRegisteredUsers,
+      registeredUsers,
+      totalSongs,
+      activeUsersCount,
+      activeUsers
+    });
+  } catch (error: any) {
+    console.error("[Admin Metrics] Error retrieving metrics:", error);
+    res.status(500).json({ error: "Internal server error retrieving metrics.", message: error.message });
+  }
+});
+
+// Admin update user role endpoint
+app.post("/api/admin/users/role", async (req, res) => {
+  const adminPasswordHeader = req.headers["x-admin-password"];
+  if (adminPasswordHeader !== "mulbeery" && adminPasswordHeader !== "mulberry") {
+    return res.status(401).json({ error: "Unauthorized. Invalid admin password." });
+  }
+
+  const { userId, role } = req.body;
+  if (!userId || !role) {
+    return res.status(400).json({ error: "userId and role are required." });
+  }
+
+  try {
+    const dbResult = await pool.query(
+      "UPDATE users SET role = $2 WHERE id = $1 RETURNING *",
+      [userId, role]
+    );
+
+    if (dbResult.rows.length === 0) {
+      return res.status(404).json({ error: "User not found." });
+    }
+
+    res.json({ success: true, user: dbResult.rows[0] });
+  } catch (error: any) {
+    console.error("[Admin Users] Error updating role:", error);
+    res.status(500).json({ error: "Internal server error updating role.", message: error.message });
+  }
+});
+
+// Admin delete user endpoint
+app.post("/api/admin/users/delete", async (req, res) => {
+  const adminPasswordHeader = req.headers["x-admin-password"];
+  if (adminPasswordHeader !== "mulbeery" && adminPasswordHeader !== "mulberry") {
+    return res.status(401).json({ error: "Unauthorized. Invalid admin password." });
+  }
+
+  const { userId } = req.body;
+  if (!userId) {
+    return res.status(400).json({ error: "userId is required." });
+  }
+
+  try {
+    const dbResult = await pool.query(
+      "DELETE FROM users WHERE id = $1 RETURNING *",
+      [userId]
+    );
+
+    if (dbResult.rows.length === 0) {
+      return res.status(404).json({ error: "User not found." });
+    }
+
+    res.json({ success: true, message: "User deleted successfully.", user: dbResult.rows[0] });
+  } catch (error: any) {
+    console.error("[Admin Users] Error deleting user:", error);
+    res.status(500).json({ error: "Internal server error deleting user.", message: error.message });
+  }
+});
+
+
+
 
 // Serve Vite or static files
 async function startServer() {

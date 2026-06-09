@@ -8,6 +8,8 @@ interface ProfilePanelProps {
   favoritesCount: number;
   playlistsCount: number;
   listeningHabits: ListeningHabit[];
+  googleUser: any;
+  onSignOut: () => void;
 }
 
 export function ProfilePanel({
@@ -15,10 +17,13 @@ export function ProfilePanel({
   onChangeUsername,
   favoritesCount,
   playlistsCount,
-  listeningHabits
+  listeningHabits,
+  googleUser,
+  onSignOut
 }: ProfilePanelProps) {
   const [editingUsername, setEditingUsername] = useState(false);
   const [usernameInput, setUsernameInput] = useState(username);
+
 
   const handleUsernameSub = (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,7 +47,7 @@ export function ProfilePanel({
                 <img
                   alt="Profile Avatar"
                   className="w-full h-full rounded-full object-cover border-2 border-[#0f0b0d]"
-                  src="https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=300"
+                  src={googleUser && googleUser.picture ? googleUser.picture : "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=300"}
                 />
               </div>
               <button 
@@ -72,10 +77,18 @@ export function ProfilePanel({
                 </button>
               </form>
             ) : (
-              <h2 className="font-serif text-lg font-bold text-white mb-0.5 flex items-center gap-1.5 justify-center">
-                {username} 
-                <span className="text-[7px] bg-white/5 text-[#FF007A] border border-white/10 rounded px-1 py-0.5 font-sans tracking-widest font-bold">PRO</span>
-              </h2>
+              <div>
+                <h2 className="font-serif text-lg font-bold text-white mb-0.5 flex items-center gap-1.5 justify-center">
+                  {username} 
+                  <span className="text-[7px] bg-white/5 text-[#FF007A] border border-[#FF007A]/10 rounded px-1 py-0.5 font-sans tracking-widest font-bold">PRO</span>
+                  {googleUser && googleUser.role === "admin" && (
+                    <span className="text-[7px] bg-red-500/10 text-red-400 border border-red-500/20 rounded px-1 py-0.5 font-sans tracking-widest font-bold">ADMIN</span>
+                  )}
+                </h2>
+                {googleUser && (
+                  <p className="text-[10px] font-sans text-white/40 mb-1">{googleUser.email}</p>
+                )}
+              </div>
             )}
 
             <p className="font-sans text-[8px] text-white/40 uppercase tracking-[0.2em] mb-4">
@@ -89,9 +102,14 @@ export function ProfilePanel({
               >
                 Edit Name
               </button>
-              <button className="glass-panel text-white/70 border-white/5 px-4 py-1.5 rounded-full font-sans text-[9px] font-bold uppercase tracking-wider hover:bg-white/5 transition-all cursor-pointer">
-                Share
-              </button>
+              {googleUser && (
+                <button 
+                  onClick={onSignOut}
+                  className="bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 px-4 py-1.5 rounded-full font-sans text-[9px] font-bold uppercase tracking-wider transition-all cursor-pointer"
+                >
+                  Sign Out
+                </button>
+              )}
             </div>
           </section>
 
@@ -110,8 +128,35 @@ export function ProfilePanel({
 
         {/* Right Column: Audio Parameters, Listening Habits, and Session settings */}
         <div className="lg:col-span-2 space-y-6 w-full">
+          {/* Google Auth Integration Section */}
+          <section className="glass-panel p-5 rounded-2xl border border-white/5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-serif text-xs font-bold text-white/80">Google Authentication</h3>
+                <p className="font-sans text-[10px] text-white/40 mt-0.5">
+                  {googleUser 
+                    ? "Authenticated and connected to Skywave Server cloud database." 
+                    : "Connect your Google account to sync, save custom playlists, and audit logs."}
+                </p>
+              </div>
+              <span className={`text-[7px] border rounded px-1.5 py-0.5 font-sans tracking-widest font-bold uppercase ${
+                googleUser 
+                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
+                  : "bg-white/5 text-white/40 border-white/10"
+              }`}>
+                {googleUser ? "Connected" : "Guest Mode"}
+              </span>
+            </div>
+            {!googleUser && (
+              <div className="flex flex-col items-center py-2">
+                <div id="google-signin-btn"></div>
+              </div>
+            )}
+          </section>
+
           {/* Audio Preferences */}
           <section className="glass-panel rounded-xl overflow-hidden border border-white/5 divide-y divide-white/5">
+
             <div className="p-3 bg-white/[0.02] flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-[#FF007A] animate-pulse" />
               <h3 className="font-serif text-xs font-bold text-white/80">Premium Audio Parameters</h3>

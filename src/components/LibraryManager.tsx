@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Play, Sparkles, Plus, Trash2, ArrowRight, Heart, ListMusic, RefreshCw, Shuffle } from "lucide-react";
+import { Play, Sparkles, Plus, Trash2, ArrowRight, Heart, ListMusic, RefreshCw, Shuffle, FolderPlus } from "lucide-react";
 import { Song, Playlist } from "../types";
 
 interface LibraryManagerProps {

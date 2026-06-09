@@ -8,6 +8,7 @@ import { LibraryManager } from "./components/LibraryManager";
 import { ActivePlayer } from "./components/ActivePlayer";
 import { ProfilePanel } from "./components/ProfilePanel";
 import { YouTubePlayer } from "./components/YouTubePlayer";
+import { AdminPanel } from "./components/AdminPanel";
 
 const PRESET_SONGS: Song[] = [
   {
@@ -108,6 +109,8 @@ const PRESET_SONGS: Song[] = [
   }
 ];
 
+const GOOGLE_CLIENT_ID = (import.meta as any).env.VITE_GOOGLE_CLIENT_ID || "950921906220-mulberry.apps.googleusercontent.com";
+
 export default function App() {
   const [activeTab, setActiveTab] = useState("home");
   const [songs, setSongs] = useState<Song[]>([]);
@@ -121,6 +124,91 @@ export default function App() {
   const [favorites, setFavorites] = useState<string[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [listeningHabits, setListeningHabits] = useState<ListeningHabit[]>([]);
+
+  // Google OAuth & Admin state
+  const [googleUser, setGoogleUser] = useState<any>(null);
+  const [adminPassword, setAdminPassword] = useState<string>(() => localStorage.getItem("melo_admin_password") || "");
+  const [isAdminUnlocked, setIsAdminUnlocked] = useState<boolean>(() => localStorage.getItem("melo_admin_unlocked") === "true");
+
+  // Google sign in callback
+  const handleGoogleSignInResponse = async (response: any) => {
+    try {
+      const res = await fetch("/api/auth/google", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ credential: response.credential })
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || "Google authentication failed.");
+      }
+
+      const data = await res.json();
+      if (data.success && data.user) {
+        setGoogleUser(data.user);
+        setUsername(data.user.name);
+        localStorage.setItem("melo_google_user", JSON.stringify(data.user));
+      }
+    } catch (err) {
+      console.error("[Google Sign-In Error]", err);
+    }
+  };
+
+  const handleSignOut = () => {
+    setGoogleUser(null);
+    setUsername("skywave_listener");
+    localStorage.removeItem("melo_google_user");
+    if ((window as any).google) {
+      (window as any).google.accounts.id.disableAutoSelect();
+    }
+  };
+
+  // Load Google user on mount
+  useEffect(() => {
+    const savedUser = localStorage.getItem("melo_google_user");
+    if (savedUser) {
+      try {
+        const parsed = JSON.parse(savedUser);
+        setGoogleUser(parsed);
+        setUsername(parsed.name);
+      } catch (e) {
+        console.warn("Failed to parse saved google user:", e);
+      }
+    }
+  }, []);
+
+  // Initialize Google Identity Services
+  useEffect(() => {
+    const initGoogleGSI = () => {
+      if ((window as any).google) {
+        (window as any).google.accounts.id.initialize({
+          client_id: GOOGLE_CLIENT_ID,
+          callback: handleGoogleSignInResponse,
+          auto_select: false
+        });
+        
+        const btnElem = document.getElementById("google-signin-btn");
+        if (btnElem) {
+          (window as any).google.accounts.id.renderButton(
+            btnElem,
+            { theme: "outline", size: "large", text: "signin_with" }
+          );
+        }
+      }
+    };
+
+    const interval = setInterval(() => {
+      if ((window as any).google) {
+        initGoogleGSI();
+        clearInterval(interval);
+      }
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [activeTab, googleUser]);
+
+
 
   // Queue properties (sequential "line-wise" queue or random play)
   const [musicQueue, setMusicQueue] = useState<Song[]>([]);
@@ -517,6 +605,18 @@ export default function App() {
             favoritesCount={favorites.length}
             playlistsCount={playlists.length}
             listeningHabits={listeningHabits}
+            googleUser={googleUser}
+            onSignOut={handleSignOut}
+          />
+        );
+      case "admin":
+        return (
+          <AdminPanel
+            adminPassword={adminPassword}
+            setAdminPassword={setAdminPassword}
+            isAdminUnlocked={isAdminUnlocked}
+            setIsAdminUnlocked={setIsAdminUnlocked}
+            currentUsername={username}
           />
         );
       default:
@@ -668,6 +768,16 @@ export default function App() {
         >
           <span className="text-lg">◯</span>
           <span className="text-[9px] uppercase tracking-wider mt-0.5">Profile</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab("admin")}
+          className={`flex flex-col items-center justify-center transition-all duration-200 cursor-pointer ${
+            activeTab === "admin" ? "text-[#FF007A]" : "text-white/40 hover:text-white/60"
+          }`}
+        >
+          <span className="text-lg">🛡</span>
+          <span className="text-[9px] uppercase tracking-wider mt-0.5">Admin</span>
         </button>
       </nav>
     </div>
