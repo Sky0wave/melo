@@ -143,6 +143,48 @@ var PRESET_SONGS = [
     mood: "Immersive, Spacey, Journey",
     lyrics: "A twelve-hour trip into experimental soundscapes.\nNo words exist here, only the soft vibration of organic pads,\ncoupled with silver highlights that glisten in your ears.\nExperience the sheer grandeur of high-fidelity silence.",
     coverUrl: "https://lh3.googleusercontent.com/aida-public/AB6AXuDF8ISXacJ8Z4_ZAH29Hq3dsWFbPzfglUIQmxAXu4UwtxznSobGfBUtCagiIAXDIdPf6TlTDJo3FN4k7W_RwwS5Durnr96CTbQq_0FTYoUbK54Vx9uN7jwMUFcNXkVFo5tvuoUbsydpKskCTtA7PkPnI9w7Td64B4h_-vbGvGkgL_tE8g4XpcXTjsSPS5ExR9ttWA9-XaA1U8sBpTJfbTKvNVAPP-zv-gQzFpkiM2bIdCPSA8178bxFGAo6J695Zt5UjVqNpTY8JO8"
+  },
+  {
+    id: "yt_7KIHvuMl4Kk",
+    title: "Golden Brown",
+    artist: "The Stranglers",
+    album: "La Folie",
+    duration: "03:27",
+    durationSeconds: 207,
+    genre: "Rock",
+    mood: "Classic",
+    lyrics: "Golden brown, texture like sun\nLays me down, with my mind she runs\nThroughout the night\nNo need to fight\nNever a frown with golden brown",
+    coverUrl: "https://img.youtube.com/vi/7KIHvuMl4Kk/hqdefault.jpg",
+    videoId: "7KIHvuMl4Kk",
+    source: "youtube"
+  },
+  {
+    id: "yt_o_1aF54DO60",
+    title: "Young and Beautiful",
+    artist: "Lana Del Rey",
+    album: "The Great Gatsby",
+    duration: "03:56",
+    durationSeconds: 236,
+    genre: "Pop",
+    mood: "Melancholic",
+    lyrics: "Hot summer nights, mid-July\nWhen you and I were forever wild\nThe crazy days, city lights\nThe way you'd play with me like a child\n\nWill you still love me when I'm no longer young and beautiful?",
+    coverUrl: "https://img.youtube.com/vi/o_1aF54DO60/hqdefault.jpg",
+    videoId: "o_1aF54DO60",
+    source: "youtube"
+  },
+  {
+    id: "yt_8xg3vE8Ie_E",
+    title: "Love Story",
+    artist: "Taylor Swift",
+    album: "Fearless",
+    duration: "03:55",
+    durationSeconds: 235,
+    genre: "Country Pop",
+    mood: "Romantic",
+    lyrics: "We were both young when I first saw you\nI close my eyes and the flashback starts\nI'm standing there\nOn a balcony in summer air\n\nRomeo, take me somewhere we can be alone\nI'll be waiting, all that's left to do is run",
+    coverUrl: "https://img.youtube.com/vi/8xg3vE8Ie_E/hqdefault.jpg",
+    videoId: "8xg3vE8Ie_E",
+    source: "youtube"
   }
 ];
 var ACTIVE_PLAYBACKS = /* @__PURE__ */ new Map();
