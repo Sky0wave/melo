@@ -1,0 +1,9 @@
+# Title | Artist | Video ID or YouTube Link | Duration | Thumbnail | Language
+Tum Hi Ho | Arijit Singh | Y3D2U-0tV_E | 04:22 | https://img.youtube.com/vi/Y3D2U-0tV_E/hqdefault.jpg | hindi
+Lemonade | Diljit Dosanjh | yH15sVjA2iE | 03:12 | https://img.youtube.com/vi/yH15sVjA2iE/hqdefault.jpg | hindi
+Blank Space | Taylor Swift | e-ORhEE9VVg | 03:51 | https://img.youtube.com/vi/e-ORhEE9VVg/hqdefault.jpg | english
+Shape of You | Ed Sheeran | JGwWNGJdvx8 | 03:53 | https://img.youtube.com/vi/JGwWNGJdvx8/hqdefault.jpg | english
+Kesariya | Arijit Singh | BddP6PYo2gs | 04:28 | https://img.youtube.com/vi/BddP6PYo2gs/hqdefault.jpg | hindi
+Blinding Lights | The Weeknd | 4NRXx6U8ABQ | 03:20 | https://img.youtube.com/vi/4NRXx6U8ABQ/hqdefault.jpg | english
+As It Was | Harry Styles | H5v3kku4y6Q | 02:47 | https://img.youtube.com/vi/H5v3kku4y6Q/hqdefault.jpg | english
+Pasoori | Ali Sethi | 5Eqb_-Sh0bc | 03:44 | https://img.youtube.com/vi/5Eqb_-Sh0bc/hqdefault.jpg | hindi

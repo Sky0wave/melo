@@ -1,0 +1,6 @@
+{
+  "name": "Mulberry Sound",
+  "description": "A luxury, high-fidelity music streaming application featuring real-time synchronized playback, personalized AI playlists, search for any song, and a glossy deep mulberry glassmorphism design.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

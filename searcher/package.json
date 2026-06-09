@@ -1,0 +1,21 @@
+{
+  "name": "searcher",
+  "version": "1.0.0",
+  "description": "YouTube Song Database Importer & Search Tool for Mulberry Sound",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "import": "tsx src/import-songs.ts",
+    "stats": "tsx src/stats.ts"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@types/pg": "^8.11.0",
+    "typescript": "~5.8.2",
+    "tsx": "^4.21.0"
+  }
+}

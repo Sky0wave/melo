@@ -1,0 +1,175 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Manrope:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Playfair Display", Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Obsidian Cathedral Theme Palette Colors (Melo branding) */
+  --color-mulberry-base: #080507;        /* void */
+  --color-mulberry-dark: #0f0b0d;        /* obsidian */
+  --color-mulberry-mid: #19141a;         /* crypt */
+  --color-mulberry-light: #231a20;       /* vault */
+  --color-mulberry-glow: #2e2229;        /* vault2 */
+  --color-mulberry-primary: #FF007A;     /* Melo Hot Pink */
+  --color-mulberry-tertiary: #c0305a;    /* ember */
+  --color-mulberry-on: rgba(255, 255, 255, 0.88); /* silk */
+  --color-mulberry-on-variant: rgba(255, 255, 255, 0.45); /* mist */
+
+  /* Theme mappings for compatibility */
+  --color-primary: #FF007A;
+  --color-background: #080507;
+  --color-surface: #0f0b0d;
+  --color-surface-container: #19141a;
+  --color-on-surface: rgba(255, 255, 255, 0.88);
+  --color-on-surface-variant: rgba(255, 255, 255, 0.45);
+  --color-outline: rgba(255, 255, 255, 0.1);
+  --color-outline-variant: rgba(255, 255, 255, 0.07);
+
+  /* Font Families */
+  --font-headline-lg: "Playfair Display", serif;
+  --font-display-lg: "Playfair Display", serif;
+  --font-title-md: "Manrope", sans-serif;
+  --font-body-md: "Manrope", sans-serif;
+  --font-label-sm: "Manrope", sans-serif;
+
+  /* Font Sizes / Styles */
+  --text-headline-lg: 32px;
+  --text-headline-lg--line-height: 1.2;
+  --text-headline-lg--font-weight: 500;
+
+  --text-title-md: 18px;
+  --text-title-md--line-height: 1.4;
+  --text-title-md--font-weight: 500;
+
+  --text-body-md: 14px;
+  --text-body-md--line-height: 1.6;
+  --text-body-md--font-weight: 400;
+
+  --text-label-sm: 11px;
+  --text-label-sm--line-height: 1;
+  --text-label-sm--letter-spacing: 0.08em;
+  --text-label-sm--font-weight: 600;
+
+  --text-display-lg: 42px;
+  --text-display-lg--line-height: 1.1;
+  --text-display-lg--letter-spacing: -0.02em;
+  --text-display-lg--font-weight: 600;
+
+  /* Spacing */
+  --spacing-margin-desktop: 20px;
+  --spacing-container-padding: 20px;
+  --spacing-margin-mobile: 16px;
+  --spacing-gutter: 16px;
+  --spacing-unit: 8px;
+}
+
+body {
+  background-color: #080507; /* void */
+  color: rgba(255, 255, 255, 0.88); /* silk */
+  overflow-x: hidden;
+  position: relative;
+  min-height: 100vh;
+}
+
+/* Cross-hatch cathedral texture overlay */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    repeating-linear-gradient(0deg,   rgba(255, 0, 122, 0.012) 0px, rgba(255, 0, 122, 0.012) 1px, transparent 1px, transparent 32px),
+    repeating-linear-gradient(90deg,  rgba(255, 0, 122, 0.010) 0px, rgba(255, 0, 122, 0.010) 1px, transparent 1px, transparent 32px),
+    repeating-linear-gradient(45deg,  rgba(255, 255, 255, 0.005) 0px, rgba(255, 255, 255, 0.005) 1px, transparent 1px, transparent 48px),
+    repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.005) 0px, rgba(255, 255, 255, 0.005) 1px, transparent 1px, transparent 48px);
+}
+
+/* Custom Scrollbars */
+.custom-scrollbar::-webkit-scrollbar {
+  height: 4px;
+  width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 0, 122, 0.2);
+  border-radius: 10px;
+}
+
+/* Glass panel background */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 0.5px solid rgba(255, 255, 255, 0.07);
+}
+
+.silver-edge {
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+}
+
+.silver-thread {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.07), transparent);
+  height: 0.5px;
+  width: 100%;
+}
+
+.progress-rail {
+  height: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  position: relative;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #FF007A, #ffd8e8);
+  border-radius: 2px;
+}
+
+.progress-handle {
+  width: 11px;
+  height: 11px;
+  background: #ffd8e8;
+  border-radius: 50%;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  transition: opacity 0.2s;
+  box-shadow: 0 0 8px rgba(255, 0, 122, 0.6);
+}
+
+.progress-rail:hover .progress-handle {
+  opacity: 1;
+}
+
+/* Accessibility overrides */
+.text-mulberry-on-variant\/40 {
+  color: rgba(255, 255, 255, 0.45) !important;
+}
+.text-on-surface-variant\/40 {
+  color: rgba(255, 255, 255, 0.45) !important;
+}
+.text-on-surface-variant\/50 {
+  color: rgba(255, 255, 255, 0.55) !important;
+}
+.text-on-surface-variant\/60 {
+  color: rgba(255, 255, 255, 0.65) !important;
+}
+.text-mulberry-on-variant\/50 {
+  color: rgba(255, 255, 255, 0.55) !important;
+}
+.text-mulberry-on-variant\/60 {
+  color: rgba(255, 255, 255, 0.65) !important;
+}
+.text-on-surface\/20 {
+  color: rgba(255, 255, 255, 0.22) !important;
+}
+.text-on-surface\/40 {
+  color: rgba(255, 255, 255, 0.45) !important;
+}
