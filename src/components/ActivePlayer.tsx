@@ -96,6 +96,11 @@ export function ActivePlayer({
   const [newPlaylistName, setNewPlaylistName] = useState("");
   const [addedStatus, setAddedStatus] = useState<string | null>(null);
 
+  // Seek bar dragging state
+  const progressBarRef = useRef<HTMLDivElement>(null);
+  const [dragProgress, setDragProgress] = useState<number | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
   const formatTime = (secs: number) => {
     const mins = Math.floor(secs / 60);
     const remainingSecs = Math.floor(secs % 60);
@@ -189,13 +194,71 @@ export function ActivePlayer({
     }
   }, [activeLineIndex]);
 
-  const handleProgressBarClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!currentSong) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
+  const handleProgressSeek = (clientX: number) => {
+    if (!currentSong || !progressBarRef.current) return;
+    const rect = progressBarRef.current.getBoundingClientRect();
+    const x = clientX - rect.left;
     const percent = Math.max(0, Math.min(1, x / rect.width));
-    setProgress(Math.floor(percent * currentSong.durationSeconds));
+    const targetSeconds = Math.floor(percent * currentSong.durationSeconds);
+    setDragProgress(targetSeconds);
   };
+
+  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!currentSong) return;
+    setIsDragging(true);
+    handleProgressSeek(e.clientX);
+  };
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (!currentSong) return;
+    setIsDragging(true);
+    if (e.touches[0]) {
+      handleProgressSeek(e.touches[0].clientX);
+    }
+  };
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      handleProgressSeek(e.clientX);
+    };
+
+    const handleMouseUp = () => {
+      if (dragProgress !== null) {
+        setProgress(dragProgress);
+      }
+      setIsDragging(false);
+      setDragProgress(null);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches[0]) {
+        handleProgressSeek(e.touches[0].clientX);
+      }
+    };
+
+    const handleTouchEnd = () => {
+      if (dragProgress !== null) {
+        setProgress(dragProgress);
+      }
+      setIsDragging(false);
+      setDragProgress(null);
+    };
+
+    window.addEventListener("touchmove", handleTouchMove, { passive: true });
+    window.addEventListener("touchend", handleTouchEnd);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+      window.removeEventListener("touchmove", handleTouchMove);
+      window.removeEventListener("touchend", handleTouchEnd);
+    };
+  }, [isDragging, dragProgress, currentSong]);
 
   const handleAddToPlaylist = (playlistId: string, playlistName: string) => {
     if (!currentSong) return;
@@ -254,18 +317,20 @@ export function ActivePlayer({
       {/* Progress & Slider */}
       <div className="space-y-2 select-none">
         <div 
-          onClick={handleProgressBarClick}
-          className="h-[4px] bg-white/5 rounded-full relative overflow-visible cursor-pointer group"
+          ref={progressBarRef}
+          onMouseDown={handleMouseDown}
+          onTouchStart={handleTouchStart}
+          className="h-[4.5px] bg-white/5 rounded-full relative overflow-visible cursor-pointer group"
         >
           <div 
             className="h-full bg-[#FF007A] rounded-full relative"
-            style={{ width: `${(progress / currentSong.durationSeconds) * 100}%` }}
+            style={{ width: `${((dragProgress !== null ? dragProgress : progress) / currentSong.durationSeconds) * 100}%` }}
           >
-            <div className="absolute right-0 top-1/2 -translate-y-1/2 w-2.5 h-2.5 bg-white border border-[#FF007A] rounded-full scale-0 group-hover:scale-100 transition-transform"></div>
+            <div className={`absolute right-0 top-1/2 -translate-y-1/2 w-2.5 h-2.5 bg-white border border-[#FF007A] rounded-full transition-transform ${isDragging ? 'scale-100' : 'scale-0 group-hover:scale-100'}`}></div>
           </div>
         </div>
         <div className="flex justify-between font-mono text-[9px] text-white/30 px-0.5">
-          <span>{formatTime(progress)}</span>
+          <span>{formatTime(dragProgress !== null ? dragProgress : progress)}</span>
           <span>{currentSong.duration}</span>
         </div>
       </div>
