@@ -675,6 +675,49 @@ app.post("/api/db/search", async (req, res) => {
   }
 });
 
+// YouTube search fallback when API key is missing or request fails
+async function handleYoutubeSearchFallback(query: string, maxResults: number, res: any) {
+  try {
+    const cleanQuery = query.trim();
+    const ilikeQuery = `%${cleanQuery}%`;
+    const dbResults = await pool.query(`
+      SELECT * FROM songs
+      WHERE (title ILIKE $2 OR artist ILIKE $2)
+      LIMIT $3
+    `, [cleanQuery, ilikeQuery, maxResults]);
+    
+    if (dbResults.rows.length > 0) {
+      const songs = dbResults.rows.map((row: any) => ({
+        id: `yt_${row.video_id}`,
+        title: row.title,
+        artist: row.artist,
+        album: row.language ? `${row.language.toUpperCase()} Library` : "Local Library",
+        duration: row.duration || "03:00",
+        durationSeconds: row.duration_seconds || 180,
+        genre: row.language || "Music",
+        mood: "Database",
+        lyrics: "",
+        coverUrl: row.cover_url || `https://img.youtube.com/vi/${row.video_id}/hqdefault.jpg`,
+        videoId: row.video_id,
+        source: "youtube"
+      }));
+      return res.json({ results: songs, didYouMean: "" });
+    }
+  } catch (dbErr) {
+    console.warn("[YouTube Search Fallback] Database offline, using presets");
+  }
+
+  const lowercaseQuery = (query || "").toLowerCase();
+  const matchedPresets = PRESET_SONGS.filter(song => {
+    return (
+      song.title.toLowerCase().includes(lowercaseQuery) ||
+      song.artist.toLowerCase().includes(lowercaseQuery) ||
+      song.album.toLowerCase().includes(lowercaseQuery)
+    );
+  });
+  return res.json({ results: matchedPresets, didYouMean: "" });
+}
+
 // YouTube search endpoint — proxies requests to YouTube Data API v3
 app.post("/api/youtube/search", async (req, res) => {
   const { query, maxResults = 50 } = req.body;
@@ -684,8 +727,8 @@ app.post("/api/youtube/search", async (req, res) => {
   }
 
   if (!YOUTUBE_API_KEY) {
-    console.error("YOUTUBE_API_KEY is not configured in .env");
-    return res.status(500).json({ error: "YouTube API key not configured" });
+    console.warn("YOUTUBE_API_KEY is not configured in .env. Falling back to local search.");
+    return handleYoutubeSearchFallback(query, maxResults, res);
   }
 
   const cacheKey = `yt_search:${query.trim().toLowerCase()}:${maxResults}`;
@@ -875,8 +918,8 @@ app.post("/api/youtube/search", async (req, res) => {
     console.log(`[YouTube Search] "${query}" → ${songs.length} results. Spelling suggestion: "${didYouMean}"`);
     res.json(responseObj);
   } catch (error) {
-    console.error("YouTube search proxy failed:", error);
-    res.status(500).json({ error: "YouTube search failed" });
+    console.error("YouTube search proxy failed, falling back to local search:", error);
+    return handleYoutubeSearchFallback(query, maxResults, res);
   }
 });
 
