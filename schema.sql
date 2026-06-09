@@ -1,5 +1,5 @@
--- Database Schema for Mulberry Sound
--- Run: docker exec -i mulberry-postgres psql -U mulberry -d mulberry_sound < schema.sql
+-- Database Schema for Melo (Mulberry Sound)
+-- Run against Neon: psql $DATABASE_URL -f schema.sql
 
 -- Enable pg_trgm extension for fast search (fuzzy matching)
 CREATE EXTENSION IF NOT EXISTS pg_trgm;

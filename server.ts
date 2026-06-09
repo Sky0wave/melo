@@ -9,16 +9,70 @@ import * as cheerio from "cheerio";
 
 dotenv.config();
 
-// Initialize PostgreSQL Pool with a 3-second connection timeout
+// PostgreSQL pool — tuned for Neon serverless (longer timeouts, keepAlive)
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
-  connectionTimeoutMillis: 3000,
-  idleTimeoutMillis: 5000
+  max: 3,                          // small pool for serverless
+  min: 0,                          // don't hold idle connections
+  connectionTimeoutMillis: 10000,  // Neon SSL handshake can take 3-5s
+  idleTimeoutMillis: 30000,        // keep connections alive longer
+  allowExitOnIdle: true,
+  ssl: process.env.DATABASE_URL?.includes('neon.tech') ? { rejectUnauthorized: false } : false
 });
 
 pool.on("error", (err) => {
-  console.error("Unexpected database error on idle client:", err);
+  console.error("[DB Pool] Unexpected idle client error:", err.message);
 });
+
+// ── Robust DB cache writer ───────────────────────────────────────────────────
+// Used by every search route. Retries once on transient errors, logs clearly.
+async function cacheToDb(songs: any[]): Promise<void> {
+  const valid = songs.filter(s => s.videoId && s.videoId.trim().length > 0);
+  if (valid.length === 0) return;
+
+  const hindiKw = ["tum","kesariya","dil","pyar","aashiqui","singh","dosanjh","pasoori","arijit",
+                   "jubin","sonu","lata","atif","tere","rabba","sanam","bollywood","t-series","zee music"];
+
+  const values: any[] = [];
+  const placeholders: string[] = [];
+  let pi = 0;
+  for (const song of valid) {
+    const base = pi * 7;
+    placeholders.push(`($${base+1},$${base+2},$${base+3},$${base+4},$${base+5},$${base+6},$${base+7})`);
+    const tl = (song.title + " " + (song.artist || "")).toLowerCase();
+    const lang = (/[^\x00-\x7F]/.test(song.title) || hindiKw.some(k => tl.includes(k))) ? "hindi" : "english";
+    values.push(
+      song.videoId,
+      (song.title || "Unknown").slice(0, 500),
+      (song.artist || "Unknown").slice(0, 300),
+      song.duration || "03:00",
+      song.durationSeconds || 180,
+      (song.coverUrl || `https://img.youtube.com/vi/${song.videoId}/hqdefault.jpg`).slice(0, 500),
+      lang
+    );
+    pi++;
+  }
+
+  const sql = `
+    INSERT INTO songs (video_id, title, artist, duration, duration_seconds, cover_url, language)
+    VALUES ${placeholders.join(",")}
+    ON CONFLICT (video_id) DO UPDATE
+      SET title=EXCLUDED.title, artist=EXCLUDED.artist,
+          duration=EXCLUDED.duration, duration_seconds=EXCLUDED.duration_seconds,
+          cover_url=EXCLUDED.cover_url, language=EXCLUDED.language
+  `;
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      await pool.query(sql, values);
+      console.log(`[DB Cache] ✅ Upserted ${valid.length} songs (attempt ${attempt})`);
+      return;
+    } catch (err: any) {
+      console.error(`[DB Cache] ❌ Attempt ${attempt} failed: ${err.message}`);
+      if (attempt < 2) await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+}
 
 const app = express();
 const PORT = 3000;
@@ -349,30 +403,18 @@ app.post("/api/tracks/cache", async (req, res) => {
   }
 
   try {
-    await pool.query(`
-      INSERT INTO songs (video_id, title, artist, duration, duration_seconds, cover_url, language)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-      ON CONFLICT (video_id) DO UPDATE
-        SET title = EXCLUDED.title,
-            artist = EXCLUDED.artist,
-            duration = EXCLUDED.duration,
-            duration_seconds = EXCLUDED.duration_seconds,
-            cover_url = EXCLUDED.cover_url,
-            language = EXCLUDED.language
-    `, [
+    await cacheToDb([{
       videoId,
       title,
-      artist || "YouTube Artist",
-      duration || "03:00",
-      durationSeconds || 180,
-      coverUrl || `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
-      lang
-    ]);
-    console.log(`[DB Cache] Upserted song: "${title}" (${videoId})`);
+      artist: artist || "YouTube Artist",
+      duration: duration || "03:00",
+      durationSeconds: durationSeconds || 180,
+      coverUrl: coverUrl || `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+      genre
+    }]);
     res.json({ success: true });
   } catch (dbErr: any) {
-    // DB offline — silently ok, song exists in memory fallback
-    console.warn(`[DB Cache] DB offline, skipping cache for "${title}":`, dbErr.message);
+    console.warn(`[DB Cache] Skipping cache for "${title}":`, dbErr.message);
     res.json({ success: false, cached: false, reason: "db_offline" });
   }
 });
@@ -384,30 +426,11 @@ app.post("/api/sync/update", (req, res) => {
     return res.status(400).json({ error: "Username is required" });
   }
 
-  // Auto-cache played song to local PostgreSQL if it's from YouTube
+  // Auto-cache played song to Neon if it's from YouTube
   if (currentSongId && currentSongId.startsWith("yt_") && songTitle) {
     const videoId = currentSongId.replace("yt_", "");
-    
-    const titleLower = (songTitle + " " + (songArtist || "")).toLowerCase();
-    const hindiKeywords = [
-      "tum", "hi", "ho", "kesariya", "dil", "pyar", "aashiqui", "singh", "dosanjh", "pasoori",
-      "goli", "ki", "raasleela", "ram-leela", "shreya", "ghoshal", "nehha", "kakkar", "arijit",
-      "jubin", "nautiyal", "sonu", "nigam", "lata", "mangeshkar", "kishore", "kumar", "atif", "aslam",
-      "tere", "bin", "rabba", "jeena", "sanam", "sufi", "bollywood", "t-series", "zee music", "tips",
-      "lemonade"
-    ];
-    let lang = "english";
-    if (/[^\x00-\x7F]/.test(songTitle) || hindiKeywords.some(kw => titleLower.includes(kw))) {
-      lang = "hindi";
-    }
-
-    pool.query(`
-      INSERT INTO songs (video_id, title, artist, duration, duration_seconds, cover_url, language)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-      ON CONFLICT (video_id) DO NOTHING
-    `, [videoId, songTitle, songArtist || "YouTube Artist", "03:00", 180, songCoverUrl || "", lang])
-    .then(() => console.log(`[DB Auto-Cache] Cached played song: "${songTitle}"`))
-    .catch(err => console.error("Failed to auto-cache played song:", err));
+    cacheToDb([{ videoId, title: songTitle, artist: songArtist || "YouTube Artist", coverUrl: songCoverUrl || "" }])
+      .catch(err => console.error("[Sync] Auto-cache failed:", err.message));
   }
 
   const updatedState: SyncState = {
@@ -884,60 +907,12 @@ app.post("/api/youtube/search", async (req, res) => {
     return res.json(cached);
   }
 
-  // Start spelling correction check in parallel with search
+  // Start spelling correction check in parallel with the YouTube fetch
   const didYouMeanPromise = getSpellingCorrection(query.trim());
 
-  // Cache-First check: Try to fetch from PostgreSQL database first
-  try {
-    const cleanQuery = query.trim();
-    const ilikeQuery = `%${cleanQuery}%`;
-    
-    const dbResults = await pool.query(`
-      SELECT *, 
-             similarity(title, $1) as title_sim,
-             similarity(artist, $1) as artist_sim,
-             (similarity(title, $1) + similarity(artist, $1)) as rel
-      FROM songs
-      WHERE (title ILIKE $2 OR artist ILIKE $2 OR title % $1 OR artist % $1)
-      ORDER BY rel DESC, title ASC LIMIT $3
-    `, [cleanQuery, ilikeQuery, maxResults]);
-
-    // Heuristic: Check if any strong match exists in the local database
-    const hasStrongMatch = dbResults.rows.some((row: any) => {
-      const titleSim = parseFloat(row.title_sim || "0");
-      const artistSim = parseFloat(row.artist_sim || "0");
-      const queryLower = cleanQuery.toLowerCase();
-      const isWordMatch = row.title.toLowerCase().includes(queryLower) || row.artist.toLowerCase().includes(queryLower);
-      
-      // Strong match if title/artist similarity > 0.3 OR contains query substring (length > 2)
-      return titleSim > 0.3 || artistSim > 0.3 || (isWordMatch && queryLower.length > 2);
-    });
-
-    // If any strong match exists, return database results and skip YouTube search entirely!
-    if (hasStrongMatch && dbResults.rows.length > 0) {
-      console.log(`[Cache-First DB HIT] Serving "${cleanQuery}" from PostgreSQL (Strong Match found, skipping YouTube)`);
-      const songs = dbResults.rows.map((row: any) => ({
-        id: `yt_${row.video_id}`,
-        title: row.title,
-        artist: row.artist,
-        album: row.language ? `${row.language.toUpperCase()} Library` : "Local Library",
-        duration: row.duration || "03:00",
-        durationSeconds: row.duration_seconds || 180,
-        genre: row.language || "Music",
-        mood: "Database",
-        lyrics: "",
-        coverUrl: row.cover_url || `https://img.youtube.com/vi/${row.video_id}/hqdefault.jpg`,
-        videoId: row.video_id,
-        source: "youtube"
-      }));
-      const didYouMean = await didYouMeanPromise;
-      const responseObj = { results: songs, didYouMean };
-      setCachedResult(cacheKey, responseObj);
-      return res.json(responseObj);
-    }
-  } catch (dbErr) {
-    console.error("Cache-first database lookup failed, falling back to YouTube:", dbErr);
-  }
+  // NOTE: YouTube Stream mode always hits the real YouTube API so fresh results
+  // are fetched and cached to the database every time. The DB-first shortcut
+  // is intentionally removed here — use Library DB mode to search cached data.
 
   try {
     const searchUrl = new URL("https://www.googleapis.com/youtube/v3/search");
@@ -1010,58 +985,22 @@ app.post("/api/youtube/search", async (req, res) => {
       };
     });
 
-    if (songs.length > 0) {
+    // Only keep songs with a valid YouTube video ID — empty/missing IDs cause
+    // all such rows to collapse into one DB row via the UNIQUE constraint DO UPDATE.
+    const validSongs = songs.filter((s: any) => s.videoId && s.videoId.trim().length > 0);
+
+    if (validSongs.length > 0) {
       // Push new songs into allFallbackSongs in-memory so DB search finds them in this process
       const seenIds = new Set(allFallbackSongs.map(s => s.id));
-      for (const song of songs) {
+      for (const song of validSongs) {
         if (!seenIds.has(song.id)) {
           allFallbackSongs.push(song);
           seenIds.add(song.id);
         }
       }
 
-      try {
-        const values: any[] = [];
-        const placeholders: string[] = [];
-        
-        songs.forEach((song: any, idx: number) => {
-          const base = idx * 7;
-          placeholders.push(`($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7})`);
-          
-          // Guess language heuristically
-          const titleLower = (song.title + " " + song.artist).toLowerCase();
-          const hindiKeywords = [
-            "tum", "hi", "ho", "kesariya", "dil", "pyar", "aashiqui", "singh", "dosanjh", "pasoori",
-            "goli", "ki", "raasleela", "ram-leela", "shreya", "ghoshal", "nehha", "kakkar", "arijit",
-            "jubin", "nautiyal", "sonu", "nigam", "lata", "mangeshkar", "kishore", "kumar", "atif", "aslam",
-            "tere", "bin", "rabba", "jeena", "sanam", "sufi", "bollywood", "t-series", "zee music", "tips",
-            "lemonade"
-          ];
-          let lang = "english";
-          if (/[^\x00-\x7F]/.test(song.title) || hindiKeywords.some(kw => titleLower.includes(kw))) {
-            lang = "hindi";
-          }
-
-          values.push(
-            song.videoId,
-            song.title,
-            song.artist,
-            song.duration || "03:00",
-            song.durationSeconds || 180,
-            song.coverUrl || "",
-            lang
-          );
-        });
-
-        await pool.query(`
-          INSERT INTO songs (video_id, title, artist, duration, duration_seconds, cover_url, language)
-          VALUES ${placeholders.join(", ")}
-          ON CONFLICT (video_id) DO NOTHING
-        `, values);
-        console.log(`[DB Auto-Cache] Cached ${songs.length} search results from YouTube API to PostgreSQL`);
-      } catch (dbErr) {
-        console.error("Failed to automatically cache YouTube search results to DB:", dbErr);
-      }
+      // Use the shared cacheToDb helper — handles retries, logging, filtering
+      cacheToDb(songs).catch(e => console.error("[YT Search] cacheToDb failed:", e?.message));
     }
 
     const didYouMean = await didYouMeanPromise;
@@ -1075,7 +1014,197 @@ app.post("/api/youtube/search", async (req, res) => {
   }
 });
 
+// ── Smart Search: DB-first → YouTube fallback → auto-cache ───────────────────
+// Flow:
+//   1. Search Neon DB (fuzzy). Results found → return immediately (⚡ cached).
+//   2. DB miss → call YouTube API, return results, then async-cache to Neon.
+//   3. Next search for the same song → Step 1 returns it instantly from DB.
+app.post("/api/smart/search", async (req, res) => {
+  const { query, limit = 20 } = req.body;
+
+  if (!query || !query.trim()) {
+    return res.json({ results: [], source: "none", didYouMean: "" });
+  }
+
+  const cleanQuery = query.trim();
+  const ilikeQuery = `%${cleanQuery}%`;
+
+  // ── Step 1: Search Neon DB first ──────────────────────────────────────────
+  try {
+    const dbResult = await pool.query(`
+      SELECT *,
+             (similarity(title, $1) + similarity(artist, $1)) AS rel
+      FROM songs
+      WHERE (title ILIKE $2 OR artist ILIKE $2 OR title % $1 OR artist % $1)
+      ORDER BY rel DESC, title ASC
+      LIMIT $3
+    `, [cleanQuery, ilikeQuery, limit]);
+
+    if (dbResult.rows.length > 0) {
+      const songs = dbResult.rows.map((row: any) => ({
+        id: `yt_${row.video_id}`,
+        title: row.title,
+        artist: row.artist,
+        album: row.language ? `${row.language.toUpperCase()} Library` : "Cached",
+        duration: row.duration || "03:00",
+        durationSeconds: row.duration_seconds || 180,
+        genre: row.language || "Music",
+        mood: "Cached",
+        lyrics: "",
+        coverUrl: row.cover_url || `https://img.youtube.com/vi/${row.video_id}/hqdefault.jpg`,
+        videoId: row.video_id,
+        source: "youtube"
+      }));
+      console.log(`[Smart Search] ⚡ DB HIT: "${cleanQuery}" → ${songs.length} cached results`);
+      return res.json({ results: songs, source: "database", didYouMean: "" });
+    }
+  } catch (dbErr: any) {
+    console.error("[Smart Search] DB lookup error:", dbErr?.message);
+    // Continue to YouTube even if DB is unreachable
+  }
+
+  // ── Step 2: DB miss → fetch from YouTube API ───────────────────────────────
+  if (!YOUTUBE_API_KEY) {
+    const q = cleanQuery.toLowerCase();
+    const fallbacks = allFallbackSongs
+      .filter(s => s.title.toLowerCase().includes(q) || s.artist.toLowerCase().includes(q))
+      .slice(0, limit);
+    console.log(`[Smart Search] No YT key. In-memory fallback: ${fallbacks.length} results`);
+    return res.json({ results: fallbacks, source: "fallback", didYouMean: "" });
+  }
+
+  try {
+    const searchUrl = new URL("https://www.googleapis.com/youtube/v3/search");
+    searchUrl.searchParams.set("part", "snippet");
+    searchUrl.searchParams.set("q", cleanQuery);
+    searchUrl.searchParams.set("type", "video");
+    searchUrl.searchParams.set("videoCategoryId", "10");
+    searchUrl.searchParams.set("maxResults", String(limit));
+    searchUrl.searchParams.set("key", YOUTUBE_API_KEY);
+
+    const ytResponse = await fetch(searchUrl.toString());
+    if (!ytResponse.ok) {
+      throw new Error(`YouTube API ${ytResponse.status}: ${await ytResponse.text()}`);
+    }
+    const ytData = await ytResponse.json();
+
+    // Batch-fetch real durations
+    const videoIds = (ytData.items || []).map((item: any) => item.id?.videoId).filter(Boolean);
+    let durationsMap: Record<string, { duration: string; durationSeconds: number }> = {};
+    if (videoIds.length > 0) {
+      try {
+        const detailsUrl = new URL("https://www.googleapis.com/youtube/v3/videos");
+        detailsUrl.searchParams.set("part", "contentDetails");
+        detailsUrl.searchParams.set("id", videoIds.join(","));
+        detailsUrl.searchParams.set("key", YOUTUBE_API_KEY);
+        const detRes = await fetch(detailsUrl.toString());
+        if (detRes.ok) {
+          for (const item of ((await detRes.json()).items || [])) {
+            const secs = parseISO8601Duration(item.contentDetails?.duration || "PT0S");
+            durationsMap[item.id] = { duration: formatDuration(secs), durationSeconds: secs };
+          }
+        }
+      } catch (dErr) {
+        console.warn("[Smart Search] Duration fetch failed:", dErr);
+      }
+    }
+
+    // Normalise into Song shape
+    const ytSongs = (ytData.items || []).map((item: any) => {
+      const videoId = item.id?.videoId || "";
+      const snippet = item.snippet || {};
+      const dur = durationsMap[videoId] || { duration: "—", durationSeconds: 300 };
+      return {
+        id: `yt_${videoId}`,
+        title: decodeHTMLEntities(snippet.title || "Unknown Title"),
+        artist: decodeHTMLEntities(snippet.channelTitle || "Unknown Artist"),
+        album: "YouTube",
+        duration: dur.duration,
+        durationSeconds: dur.durationSeconds,
+        genre: "YouTube Music",
+        mood: "Streaming",
+        lyrics: "",
+        coverUrl: snippet.thumbnails?.high?.url || snippet.thumbnails?.medium?.url || snippet.thumbnails?.default?.url || "",
+        videoId,
+        source: "youtube"
+      };
+    });
+
+    // ── Step 3: Fire-and-forget cache to Neon ─────────────────────────────
+    const validSongs = ytSongs.filter((s: any) => s.videoId && s.videoId.trim().length > 0);
+    if (validSongs.length > 0) {
+      // Push to in-memory for this server process too
+      const seenIds = new Set(allFallbackSongs.map(s => s.id));
+      for (const song of validSongs) {
+        if (!seenIds.has(song.id)) { allFallbackSongs.push(song); seenIds.add(song.id); }
+      }
+
+      const values: any[] = [];
+      const placeholders: string[] = [];
+      let pi = 0;
+      const hindiKw = ["tum","kesariya","dil","pyar","aashiqui","singh","dosanjh","pasoori","arijit",
+                       "jubin","sonu","lata","atif","tere","rabba","sanam","bollywood","t-series"];
+      for (const song of validSongs) {
+        const base = pi * 7;
+        placeholders.push(`($${base+1},$${base+2},$${base+3},$${base+4},$${base+5},$${base+6},$${base+7})`);
+        const tl = (song.title + " " + song.artist).toLowerCase();
+        const lang = (/[^\x00-\x7F]/.test(song.title) || hindiKw.some(k => tl.includes(k))) ? "hindi" : "english";
+        values.push(song.videoId, song.title, song.artist, song.duration || "03:00", song.durationSeconds || 180, song.coverUrl || "", lang);
+        pi++;
+      }
+
+      // Async — don't block the HTTP response
+      pool.query(`
+        INSERT INTO songs (video_id, title, artist, duration, duration_seconds, cover_url, language)
+        VALUES ${placeholders.join(",")}
+        ON CONFLICT (video_id) DO UPDATE
+          SET title=EXCLUDED.title, artist=EXCLUDED.artist,
+              duration=EXCLUDED.duration, duration_seconds=EXCLUDED.duration_seconds,
+              cover_url=EXCLUDED.cover_url, language=EXCLUDED.language
+      `, values)
+      .then(() => console.log(`[Smart Search] 💾 Cached ${validSongs.length} songs to Neon — next search will be instant`))
+      .catch((e: any) => console.error("[Smart Search] Cache write failed:", e?.message));
+    }
+
+    console.log(`[Smart Search] 🔴 YouTube LIVE: "${cleanQuery}" → ${ytSongs.length} results`);
+    return res.json({ results: ytSongs, source: "youtube", didYouMean: "" });
+
+  } catch (ytErr: any) {
+    console.error("[Smart Search] YouTube API failed:", ytErr?.message);
+    const q = cleanQuery.toLowerCase();
+    const fallbacks = allFallbackSongs.filter(s =>
+      s.title.toLowerCase().includes(q) || s.artist.toLowerCase().includes(q)
+    ).slice(0, limit);
+    return res.json({ results: fallbacks, source: "fallback", didYouMean: "" });
+  }
+});
+
+// ── DB Status Debug Endpoint ───────────────────────────────────────────────────
+// Hit /api/debug/db-status from the browser to instantly see if Neon is reachable
+// and how many songs/users are currently cached.
+app.get("/api/debug/db-status", async (_req, res) => {
+  try {
+    const start = Date.now();
+    const [songs, users] = await Promise.all([
+      pool.query("SELECT COUNT(*) AS c FROM songs"),
+      pool.query("SELECT COUNT(*) AS c FROM users")
+    ]);
+    const latency = Date.now() - start;
+    res.json({
+      status: "connected",
+      latencyMs: latency,
+      songs: parseInt(songs.rows[0].c, 10),
+      users: parseInt(users.rows[0].c, 10),
+      inMemorySongs: allFallbackSongs.length,
+      pool: { totalCount: pool.totalCount, idleCount: pool.idleCount, waitingCount: pool.waitingCount }
+    });
+  } catch (err: any) {
+    res.status(503).json({ status: "error", error: err.message });
+  }
+});
+
 // YouTube video details endpoint — gets accurate duration for a single video
+
 app.get("/api/youtube/video/:videoId", async (req, res) => {
   const { videoId } = req.params;
 
