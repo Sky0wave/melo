@@ -193,35 +193,9 @@ export function AdminApp() {
 
       {/* Main Container */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Top Header Bar */}
-        <header className="h-16 border-b border-white/5 flex items-center justify-between px-8 shrink-0 select-none bg-[#0a090e]/50 backdrop-blur-sm z-10">
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-[9px] uppercase tracking-widest text-white/30">System Node:</span>
-            <span className="font-mono text-[9px] text-[#c5a880] font-bold">ONLINE</span>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <a
-              href="/"
-              className="text-[10px] text-white/50 hover:text-white flex items-center gap-1 hover:underline transition-all font-sans font-semibold uppercase tracking-wider"
-            >
-              Launch Melo App <ExternalLink className="w-3 h-3" />
-            </a>
-
-            <button
-              onClick={() => fetchMetrics(adminPassword)}
-              disabled={isLoading}
-              className="glass-card hover:bg-white/5 text-white/80 p-2 rounded-xl transition-all cursor-pointer disabled:opacity-30"
-              title="Sync Metrics Now"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`} />
-            </button>
-          </div>
-        </header>
-
         {/* Content Area */}
-        <main className="flex-1 overflow-y-auto p-8 relative">
-          <div className="max-w-7xl mx-auto space-y-6">
+        <main className="flex-1 overflow-y-auto p-12 relative">
+          <div className="max-w-7xl mx-auto space-y-8">
             {renderContent()}
           </div>
         </main>
