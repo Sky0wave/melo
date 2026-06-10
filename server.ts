@@ -1471,7 +1471,115 @@ app.post("/api/admin/users/delete", async (req, res) => {
     }
 });
 
+// Admin list cached songs
+app.get("/api/admin/songs", async (req, res) => {
+  const adminPasswordHeader = req.headers["x-admin-password"];
+  if (adminPasswordHeader !== "mulbeery" && adminPasswordHeader !== "mulberry") {
+    return res.status(401).json({ error: "Unauthorized. Invalid admin password." });
+  }
 
+  const { query, limit = 50, offset = 0 } = req.query;
+  const limitNum = parseInt(limit as string, 10) || 50;
+  const offsetNum = parseInt(offset as string, 10) || 0;
+
+  try {
+    let dbResult;
+    let totalCount = 0;
+    if (query && String(query).trim()) {
+      const q = `%${String(query).trim()}%`;
+      dbResult = await pool.query(
+        "SELECT * FROM songs WHERE title ILIKE $1 OR artist ILIKE $1 ORDER BY id DESC LIMIT $2 OFFSET $3",
+        [q, limitNum, offsetNum]
+      );
+      const countRes = await pool.query(
+        "SELECT COUNT(*) FROM songs WHERE title ILIKE $1 OR artist ILIKE $1",
+        [q]
+      );
+      totalCount = parseInt(countRes.rows[0].count, 10);
+    } else {
+      dbResult = await pool.query("SELECT * FROM songs ORDER BY id DESC LIMIT $1 OFFSET $2", [limitNum, offsetNum]);
+      const countRes = await pool.query("SELECT COUNT(*) FROM songs");
+      totalCount = parseInt(countRes.rows[0].count, 10);
+    }
+
+    res.json({ success: true, songs: dbResult.rows, totalCount });
+  } catch (error: any) {
+    console.error("[Admin Songs] Error fetching songs:", error);
+    res.status(500).json({ error: "Failed to fetch songs.", message: error.message });
+  }
+});
+
+// Admin delete cached song
+app.delete("/api/admin/songs/:videoId", async (req, res) => {
+  const adminPasswordHeader = req.headers["x-admin-password"];
+  if (adminPasswordHeader !== "mulbeery" && adminPasswordHeader !== "mulberry") {
+    return res.status(401).json({ error: "Unauthorized. Invalid admin password." });
+  }
+
+  const { videoId } = req.params;
+  try {
+    const dbResult = await pool.query("DELETE FROM songs WHERE video_id = $1 RETURNING *", [videoId]);
+    if (dbResult.rows.length === 0) {
+      return res.status(404).json({ error: "Song not found in database." });
+    }
+    res.json({ success: true, message: "Song successfully deleted from database.", song: dbResult.rows[0] });
+  } catch (error: any) {
+    console.error("[Admin Songs] Error deleting song:", error);
+    res.status(500).json({ error: "Failed to delete song.", message: error.message });
+  }
+});
+
+// Admin list search cache
+app.get("/api/admin/search-cache", async (req, res) => {
+  const adminPasswordHeader = req.headers["x-admin-password"];
+  if (adminPasswordHeader !== "mulbeery" && adminPasswordHeader !== "mulberry") {
+    return res.status(401).json({ error: "Unauthorized. Invalid admin password." });
+  }
+
+  try {
+    const dbResult = await pool.query("SELECT * FROM search_cache ORDER BY created_at DESC LIMIT 100");
+    res.json({ success: true, cache: dbResult.rows });
+  } catch (error: any) {
+    console.error("[Admin Cache] Error fetching search cache:", error);
+    res.status(500).json({ error: "Failed to fetch search cache.", message: error.message });
+  }
+});
+
+// Admin delete single search cache item
+app.delete("/api/admin/search-cache/:id", async (req, res) => {
+  const adminPasswordHeader = req.headers["x-admin-password"];
+  if (adminPasswordHeader !== "mulbeery" && adminPasswordHeader !== "mulberry") {
+    return res.status(401).json({ error: "Unauthorized. Invalid admin password." });
+  }
+
+  const { id } = req.params;
+  try {
+    const dbResult = await pool.query("DELETE FROM search_cache WHERE id = $1 RETURNING *", [id]);
+    if (dbResult.rows.length === 0) {
+      return res.status(404).json({ error: "Cache item not found." });
+    }
+    res.json({ success: true, message: "Search cache item deleted.", item: dbResult.rows[0] });
+  } catch (error: any) {
+    console.error("[Admin Cache] Error deleting search cache item:", error);
+    res.status(500).json({ error: "Failed to delete cache item.", message: error.message });
+  }
+});
+
+// Admin clear all search cache
+app.delete("/api/admin/search-cache", async (req, res) => {
+  const adminPasswordHeader = req.headers["x-admin-password"];
+  if (adminPasswordHeader !== "mulbeery" && adminPasswordHeader !== "mulberry") {
+    return res.status(401).json({ error: "Unauthorized. Invalid admin password." });
+  }
+
+  try {
+    await pool.query("DELETE FROM search_cache");
+    res.json({ success: true, message: "Search cache successfully cleared." });
+  } catch (error: any) {
+    console.error("[Admin Cache] Error clearing search cache:", error);
+    res.status(500).json({ error: "Failed to clear search cache.", message: error.message });
+  }
+});
 
 
 // Serve Vite or static files
@@ -1480,9 +1588,32 @@ async function startServer() {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: "spa",
+      appType: "custom", // Custom so we can route /admin and / independently
     });
     app.use(vite.middlewares);
+
+    // Serve HTML files dynamically in development using Vite transformations
+    app.use("*", async (req, res, next) => {
+      const url = req.originalUrl;
+      // Skip API requests
+      if (url.startsWith("/api") || url.includes(".")) {
+        return next();
+      }
+      try {
+        let template, html;
+        if (url.startsWith("/admin")) {
+          template = fs.readFileSync(path.resolve(process.cwd(), "admin.html"), "utf-8");
+          html = await vite.transformIndexHtml(url, template);
+        } else {
+          template = fs.readFileSync(path.resolve(process.cwd(), "index.html"), "utf-8");
+          html = await vite.transformIndexHtml(url, template);
+        }
+        res.status(200).set({ "Content-Type": "text/html" }).end(html);
+      } catch (e: any) {
+        vite.ssrFixStacktrace(e);
+        next(e);
+      }
+    });
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     // Cache assets aggressively but prevent HTML caching to ensure users fetch the latest built CSS/JS index reference hashes
@@ -1496,6 +1627,12 @@ async function startServer() {
         }
       }
     }));
+    app.get('/admin*', (req, res) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      res.sendFile(path.join(distPath, 'admin.html'));
+    });
     app.get('*', (req, res) => {
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
       res.setHeader('Pragma', 'no-cache');

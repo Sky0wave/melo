@@ -8,7 +8,7 @@ import { LibraryManager } from "./components/LibraryManager";
 import { ActivePlayer } from "./components/ActivePlayer";
 import { ProfilePanel } from "./components/ProfilePanel";
 import { YouTubePlayer } from "./components/YouTubePlayer";
-import { AdminPanel } from "./components/AdminPanel";
+import { LoginScreen } from "./components/LoginScreen";
 
 // const PRESET_SONGS: Song[] = [
 //   {
@@ -125,13 +125,13 @@ export default function App() {
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [listeningHabits, setListeningHabits] = useState<ListeningHabit[]>([]);
 
-  // Google OAuth & Admin state
+  // Google OAuth State
   const [googleUser, setGoogleUser] = useState<any>(null);
-  const [adminPassword, setAdminPassword] = useState<string>(() => localStorage.getItem("melo_admin_password") || "");
-  const [isAdminUnlocked, setIsAdminUnlocked] = useState<boolean>(() => localStorage.getItem("melo_admin_unlocked") === "true");
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
 
   // Google sign in callback
   const handleGoogleSignInResponse = async (response: any) => {
+    setIsAuthLoading(true);
     try {
       const res = await fetch("/api/auth/google", {
         method: "POST",
@@ -152,6 +152,8 @@ export default function App() {
       }
     } catch (err) {
       console.error("[Google Sign-In Error]", err);
+    } finally {
+      setIsAuthLoading(false);
     }
   };
 
@@ -655,20 +657,14 @@ export default function App() {
             onSignOut={handleSignOut}
           />
         );
-      case "admin":
-        return (
-          <AdminPanel
-            adminPassword={adminPassword}
-            setAdminPassword={setAdminPassword}
-            isAdminUnlocked={isAdminUnlocked}
-            setIsAdminUnlocked={setIsAdminUnlocked}
-            currentUsername={username}
-          />
-        );
       default:
         return null;
     }
   };
+
+  if (!googleUser) {
+    return <LoginScreen onSignIn={handleGoogleSignInResponse} isLoading={isAuthLoading} />;
+  }
 
   return (
     <div id="melo-app" className="relative z-10 w-full max-w-[430px] md:max-w-[800px] lg:max-w-[1200px] mx-auto min-h-screen bg-mulberry-base text-mulberry-on flex flex-col justify-between selection:bg-mulberry-primary selection:text-mulberry-base font-sans shadow-[0_0_120px_rgba(0,0,0,0.9)] overflow-x-hidden md:border-x md:border-white/5">
@@ -811,14 +807,7 @@ export default function App() {
           <span className="text-[9px] uppercase tracking-wider mt-0.5">Profile</span>
         </button>
 
-        <button
-          onClick={() => setActiveTab("admin")}
-          className={`flex flex-col items-center justify-center transition-all duration-200 cursor-pointer ${activeTab === "admin" ? "text-[#FF007A]" : "text-white/40 hover:text-white/60"
-            }`}
-        >
-          <span className="text-lg">🛡</span>
-          <span className="text-[9px] uppercase tracking-wider mt-0.5">Admin</span>
-        </button>
+
       </nav>
     </div>
   );
