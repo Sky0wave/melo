@@ -1,0 +1,22 @@
+{
+  "name": "Melo Music Player",
+  "short_name": "Melo",
+  "description": "High-fidelity Obsidian Cathedral music player with AI lyrics and synchronization.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#07060a",
+  "theme_color": "#07060a",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "https://images.unsplash.com/photo-1614149162883-504ce4d13909?w=192&h=192&fit=crop",
+      "sizes": "192x192",
+      "type": "image/jpeg"
+    },
+    {
+      "src": "https://images.unsplash.com/photo-1614149162883-504ce4d13909?w=512&h=512&fit=crop",
+      "sizes": "512x512",
+      "type": "image/jpeg"
+    }
+  ]
+}

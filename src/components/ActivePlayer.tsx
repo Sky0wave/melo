@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Play, Pause, Shuffle, Repeat, Heart, Users, Sparkles, Plus, Check, Trash2, FolderPlus, Radio } from "lucide-react";
+import { Play, Pause, Shuffle, Repeat, Heart, Users, Sparkles, Plus, Check, Trash2, FolderPlus, Radio, Sliders, ListMusic } from "lucide-react";
 import { Song, Playlist } from "../types";
 
 interface ActivePlayerProps {
@@ -28,6 +28,10 @@ interface ActivePlayerProps {
   onToggleShuffle: () => void;
   repeatOn: boolean;
   onToggleRepeat: () => void;
+
+  // Equalizer & Queue Controls
+  onOpenEqualizer: () => void;
+  onOpenQueue: () => void;
 }
 
 interface LyricLine {
@@ -82,7 +86,9 @@ export function ActivePlayer({
   shuffleOn,
   onToggleShuffle,
   repeatOn,
-  onToggleRepeat
+  onToggleRepeat,
+  onOpenEqualizer,
+  onOpenQueue
 }: ActivePlayerProps) {
   const [activeTab, setActiveTab] = useState<"lyrics" | "sync" | "playlist">("lyrics");
   const [showSimControls, setShowSimControls] = useState(false);
@@ -392,10 +398,19 @@ export function ActivePlayer({
         </button>
         <span className="text-white/10">|</span>
         <button
-          onClick={() => onToggleFavorite(currentSong.id)}
+          onClick={onOpenEqualizer}
           className="flex items-center gap-1.5 text-[9px] font-sans font-bold uppercase tracking-wider text-white/40 hover:text-white/60 transition-colors cursor-pointer"
         >
-          <span>Share</span>
+          <Sliders className="w-3.5 h-3.5" />
+          EQ
+        </button>
+        <span className="text-white/10">|</span>
+        <button
+          onClick={onOpenQueue}
+          className="flex items-center gap-1.5 text-[9px] font-sans font-bold uppercase tracking-wider text-white/40 hover:text-white/60 transition-colors cursor-pointer"
+        >
+          <ListMusic className="w-3.5 h-3.5" />
+          Queue
         </button>
       </div>
 

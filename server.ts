@@ -54,6 +54,54 @@ async function setupDatabase() {
       );
     `);
     console.log("[DB Pool] ✅ search_cache table ready");
+
+    // Create user_liked_songs table if not exists
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_liked_songs (
+        id SERIAL PRIMARY KEY,
+        user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        song_video_id VARCHAR(255) NOT NULL,
+        liked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, song_video_id)
+      );
+    `);
+    console.log("[DB Pool] ✅ user_liked_songs table ready");
+
+    // Create user_playlists table if not exists
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_playlists (
+        id SERIAL PRIMARY KEY,
+        user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name VARCHAR(255) NOT NULL,
+        description TEXT,
+        cover_url VARCHAR(500),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log("[DB Pool] ✅ user_playlists table ready");
+
+    // Create user_playlist_songs table if not exists
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_playlist_songs (
+        id SERIAL PRIMARY KEY,
+        playlist_id INT NOT NULL REFERENCES user_playlists(id) ON DELETE CASCADE,
+        song_video_id VARCHAR(255) NOT NULL,
+        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(playlist_id, song_video_id)
+      );
+    `);
+    console.log("[DB Pool] ✅ user_playlist_songs table ready");
+
+    // Create user_search_history table if not exists
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_search_history (
+        id SERIAL PRIMARY KEY,
+        user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        query VARCHAR(500) NOT NULL,
+        searched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log("[DB Pool] ✅ user_search_history table ready");
   } catch (e: any) {
     console.warn("[DB Pool] ⚠️ Database setup failed (will retry on first request):", e.message);
   }
@@ -1578,6 +1626,225 @@ app.delete("/api/admin/search-cache", async (req, res) => {
   } catch (error: any) {
     console.error("[Admin Cache] Error clearing search cache:", error);
     res.status(500).json({ error: "Failed to clear search cache.", message: error.message });
+  }
+});
+
+// ── USER FAVORITES (LIKED SONGS) ──
+app.get("/api/user/likes", async (req, res) => {
+  const userId = parseInt(req.query.userId as string, 10);
+  if (isNaN(userId)) return res.status(400).json({ error: "Invalid user ID" });
+  try {
+    const { rows } = await pool.query(
+      "SELECT song_video_id FROM user_liked_songs WHERE user_id = $1 ORDER BY liked_at DESC",
+      [userId]
+    );
+    res.json(rows.map(r => r.song_video_id));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/user/likes", async (req, res) => {
+  const { userId, videoId } = req.body;
+  if (!userId || !videoId) return res.status(400).json({ error: "Missing fields" });
+  try {
+    await pool.query(
+      "INSERT INTO user_liked_songs (user_id, song_video_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+      [parseInt(userId, 10), videoId]
+    );
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/user/likes", async (req, res) => {
+  const userId = parseInt(req.query.userId as string, 10);
+  const { videoId } = req.query;
+  if (isNaN(userId) || !videoId) return res.status(400).json({ error: "Missing fields" });
+  try {
+    await pool.query(
+      "DELETE FROM user_liked_songs WHERE user_id = $1 AND song_video_id = $2",
+      [userId, videoId]
+    );
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── USER LISTEN HISTORY (RECENTLY PLAYED) ──
+app.get("/api/user/history", async (req, res) => {
+  const userId = parseInt(req.query.userId as string, 10);
+  if (isNaN(userId)) return res.status(400).json({ error: "Invalid user ID" });
+  try {
+    const { rows } = await pool.query(
+      "SELECT song_id, song_title, artist, listened_at FROM user_listens WHERE user_id = $1 ORDER BY listened_at DESC LIMIT 50",
+      [userId]
+    );
+    res.json(rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── USER SEARCH HISTORY ──
+app.get("/api/user/search-history", async (req, res) => {
+  const userId = parseInt(req.query.userId as string, 10);
+  if (isNaN(userId)) return res.status(400).json({ error: "Invalid user ID" });
+  try {
+    const { rows } = await pool.query(
+      "SELECT id, query, searched_at FROM user_search_history WHERE user_id = $1 ORDER BY searched_at DESC LIMIT 20",
+      [userId]
+    );
+    res.json(rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/user/search-history", async (req, res) => {
+  const { userId, query } = req.body;
+  if (!userId || !query) return res.status(400).json({ error: "Missing fields" });
+  try {
+    await pool.query(
+      "INSERT INTO user_search_history (user_id, query) VALUES ($1, $2)",
+      [parseInt(userId, 10), query.trim()]
+    );
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/user/search-history", async (req, res) => {
+  const userId = parseInt(req.query.userId as string, 10);
+  const id = req.query.id ? parseInt(req.query.id as string, 10) : null;
+  if (isNaN(userId)) return res.status(400).json({ error: "Invalid user ID" });
+  try {
+    if (id) {
+      await pool.query("DELETE FROM user_search_history WHERE user_id = $1 AND id = $2", [userId, id]);
+    } else {
+      await pool.query("DELETE FROM user_search_history WHERE user_id = $1", [userId]);
+    }
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── USER PLAYLISTS ──
+app.get("/api/user/playlists", async (req, res) => {
+  const userId = parseInt(req.query.userId as string, 10);
+  if (isNaN(userId)) return res.status(400).json({ error: "Invalid user ID" });
+  try {
+    const { rows } = await pool.query(
+      `SELECT p.id::text, p.name, p.description, p.cover_url,
+              COALESCE(
+                json_agg(
+                  json_build_object(
+                    'id', 'yt_' || s.video_id,
+                    'videoId', s.video_id,
+                    'title', s.title,
+                    'artist', s.artist,
+                    'duration', s.duration,
+                    'durationSeconds', s.duration_seconds,
+                    'coverUrl', s.cover_url,
+                    'album', 'Library Cache',
+                    'genre', COALESCE(s.language, 'unknown'),
+                    'mood', 'Premium'
+                  )
+                ) FILTER (WHERE s.video_id IS NOT NULL), '[]'
+              ) AS songs
+       FROM user_playlists p
+       LEFT JOIN user_playlist_songs ups ON ups.playlist_id = p.id
+       LEFT JOIN songs s ON s.video_id = ups.song_video_id
+       WHERE p.user_id = $1
+       GROUP BY p.id
+       ORDER BY p.id DESC`,
+      [userId]
+    );
+    res.json(rows.map(r => ({
+      id: r.id,
+      name: r.name,
+      description: r.description || "Dynamic high-fidelity music collection.",
+      isCustom: true,
+      songs: r.songs,
+      coverUrl: r.cover_url || "https://images.unsplash.com/photo-1614149162883-504ce4d13909?w=300"
+    })));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/user/playlists/:id", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid playlist ID" });
+  try {
+    const playlistRes = await pool.query("SELECT * FROM user_playlists WHERE id = $1", [id]);
+    if (playlistRes.rows.length === 0) return res.status(404).json({ error: "Playlist not found" });
+    const songsRes = await pool.query("SELECT song_video_id FROM user_playlist_songs WHERE playlist_id = $1 ORDER BY added_at ASC", [id]);
+    res.json({
+      playlist: playlistRes.rows[0],
+      songVideoIds: songsRes.rows.map(r => r.song_video_id)
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/user/playlists", async (req, res) => {
+  const { userId, name, description, coverUrl } = req.body;
+  if (!userId || !name) return res.status(400).json({ error: "Missing fields" });
+  try {
+    const { rows } = await pool.query(
+      "INSERT INTO user_playlists (user_id, name, description, cover_url) VALUES ($1, $2, $3, $4) RETURNING *",
+      [parseInt(userId, 10), name, description || null, coverUrl || null]
+    );
+    res.json(rows[0]);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/user/playlists/:id", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid playlist ID" });
+  try {
+    await pool.query("DELETE FROM user_playlists WHERE id = $1", [id]);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/user/playlists/:id/songs", async (req, res) => {
+  const playlistId = parseInt(req.params.id, 10);
+  const { songVideoId } = req.body;
+  if (isNaN(playlistId) || !songVideoId) return res.status(400).json({ error: "Missing fields" });
+  try {
+    await pool.query(
+      "INSERT INTO user_playlist_songs (playlist_id, song_video_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+      [playlistId, songVideoId]
+    );
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/user/playlists/:id/songs/:videoId", async (req, res) => {
+  const playlistId = parseInt(req.params.id, 10);
+  const { videoId } = req.params;
+  if (isNaN(playlistId) || !videoId) return res.status(400).json({ error: "Missing fields" });
+  try {
+    await pool.query(
+      "DELETE FROM user_playlist_songs WHERE playlist_id = $1 AND song_video_id = $2",
+      [playlistId, videoId]
+    );
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 

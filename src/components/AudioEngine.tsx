@@ -3,12 +3,26 @@ import { useEffect, useRef } from "react";
 interface AudioEngineProps {
   isPlaying: boolean;
   songId: string | null;
+  eqBands: number[];
 }
 
-export function AudioEngine({ isPlaying, songId }: AudioEngineProps) {
+export function AudioEngine({ isPlaying, songId, eqBands }: AudioEngineProps) {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const oscillatorRef = useRef<OscillatorNode | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
+  const filtersRef = useRef<BiquadFilterNode[]>([]);
+
+  // Update EQ bands dynamically when they change without rebuilding the graph
+  useEffect(() => {
+    if (eqBands && filtersRef.current.length === eqBands.length) {
+      eqBands.forEach((gain, idx) => {
+        const filter = filtersRef.current[idx];
+        if (filter && audioCtxRef.current) {
+          filter.gain.setValueAtTime(gain, audioCtxRef.current.currentTime);
+        }
+      });
+    }
+  }, [eqBands]);
 
   useEffect(() => {
     // Lazy initialisation to comply with browser gesture requirements
@@ -32,7 +46,7 @@ export function AudioEngine({ isPlaying, songId }: AudioEngineProps) {
           oscillatorRef.current.stop();
           oscillatorRef.current.disconnect();
         } catch (_) {}
-        oscillatorRef.current = null;
+          oscillatorRef.current = null;
       }
       return;
     }
@@ -49,6 +63,8 @@ export function AudioEngine({ isPlaying, songId }: AudioEngineProps) {
           oscillatorRef.current.stop();
           oscillatorRef.current.disconnect();
         }
+        filtersRef.current.forEach(f => f.disconnect());
+        filtersRef.current = [];
 
         // Create elegant low-frequency sine synth note depending on song identity
         const osc = audioCtxRef.current.createOscillator();
@@ -69,6 +85,7 @@ export function AudioEngine({ isPlaying, songId }: AudioEngineProps) {
 
         // Low volume so it is extremely pleasant and non-disruptive
         gain.gain.setValueAtTime(0.02, audioCtxRef.current.currentTime);
+        
         // Add a gentle tremolo LFO for luxurious analog wave feel
         const lfo = audioCtxRef.current.createOscillator();
         const lfoGain = audioCtxRef.current.createGain();
@@ -79,7 +96,26 @@ export function AudioEngine({ isPlaying, songId }: AudioEngineProps) {
         lfoGain.connect(gain.gain);
         
         osc.connect(gain);
-        gain.connect(audioCtxRef.current.destination);
+
+        // Create 5 equalizer filter nodes
+        const eqFreqs = [60, 230, 910, 4000, 14000];
+        const newFilters = eqFreqs.map((f, i) => {
+          const filter = audioCtxRef.current!.createBiquadFilter();
+          filter.type = i === 0 ? "lowshelf" : i === 4 ? "highshelf" : "peaking";
+          filter.frequency.value = f;
+          filter.gain.value = eqBands[i] || 0;
+          return filter;
+        });
+
+        // Chain the filter nodes: gain -> filter0 -> filter1 -> ... -> filter4 -> destination
+        let lastNode: AudioNode = gain;
+        newFilters.forEach(filter => {
+          lastNode.connect(filter);
+          lastNode = filter;
+        });
+        lastNode.connect(audioCtxRef.current.destination);
+
+        filtersRef.current = newFilters;
 
         osc.start();
         lfo.start();

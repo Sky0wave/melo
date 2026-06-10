@@ -39,6 +39,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Melo — Obsidian Cathedral</title>
     <meta name="description" content="Melo - A premium, high-fidelity music player with real-time synchronized LRC lyrics powered by AI and search controls." />
+    <meta name="theme-color" content="#07060a" />
+    <link rel="manifest" href="/manifest.json" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -50,6 +52,15 @@
   <body class="min-h-screen flex flex-col font-body-md">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(err => {
+            console.warn('Service worker registration failed:', err);
+          });
+        });
+      }
+    </script>
   </body>
 </html>
 

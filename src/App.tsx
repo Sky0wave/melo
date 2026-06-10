@@ -9,6 +9,11 @@ import { ActivePlayer } from "./components/ActivePlayer";
 import { ProfilePanel } from "./components/ProfilePanel";
 import { YouTubePlayer } from "./components/YouTubePlayer";
 import { LoginScreen } from "./components/LoginScreen";
+import { MiniPlayer } from "./components/MiniPlayer";
+import { QueuePanel } from "./components/QueuePanel";
+import { Equalizer } from "./components/Equalizer";
+import { Notifications, NotificationItem } from "./components/Notifications";
+import { useMediaSession } from "./hooks/useMediaSession";
 
 // const PRESET_SONGS: Song[] = [
 //   {
@@ -125,6 +130,39 @@ export default function App() {
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [listeningHabits, setListeningHabits] = useState<ListeningHabit[]>([]);
 
+  // Equalizer, Queue, Notifications and Media Session states
+  const [isQueueOpen, setIsQueueOpen] = useState(false);
+  const [isEqualizerOpen, setIsEqualizerOpen] = useState(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [eqBands, setEqBands] = useState<number[]>([0, 0, 0, 0, 0]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+
+  const addNotification = (type: "info" | "success" | "warning", message: string) => {
+    const newNotif: NotificationItem = {
+      id: String(Date.now()),
+      type,
+      message,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      read: false
+    };
+    setNotifications(prev => [newNotif, ...prev]);
+    // Auto-dismiss toast style after 5s
+    setTimeout(() => {
+      setNotifications(prev => prev.filter(n => n.id !== newNotif.id));
+    }, 5000);
+  };
+
+  // Connect Media Session API for lock screen controls
+  useMediaSession({
+    currentSong,
+    isPlaying,
+    onTogglePlay: () => setIsPlaying(p => !p),
+    onNextSong,
+    onPreviousSong,
+    progress,
+    setProgress: handleSetProgress
+  });
+
   // Google OAuth State
   const [googleUser, setGoogleUser] = useState<any>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
@@ -179,6 +217,53 @@ export default function App() {
       }
     }
   }, []);
+
+  // Load user data from DB upon login
+  useEffect(() => {
+    if (!googleUser || !googleUser.id) {
+      setFavorites([]);
+      setPlaylists([]);
+      setListeningHabits([]);
+      return;
+    }
+
+    const loadUserData = async () => {
+      try {
+        // 1. Liked songs
+        const likesRes = await fetch(`/api/user/likes?userId=${googleUser.id}`);
+        if (likesRes.ok) {
+          const likes = await likesRes.json();
+          setFavorites(likes.map((s: any) => 'yt_' + s.video_id));
+        }
+
+        // 2. Playlists
+        const playlistsRes = await fetch(`/api/user/playlists?userId=${googleUser.id}`);
+        if (playlistsRes.ok) {
+          const plData = await playlistsRes.json();
+          setPlaylists(plData);
+        }
+
+        // 3. Listening history
+        const historyRes = await fetch(`/api/user/history?userId=${googleUser.id}`);
+        if (historyRes.ok) {
+          const historyData = await historyRes.json();
+          const habitsMap: Record<string, any> = {};
+          historyData.forEach((h: any) => {
+            const id = 'yt_' + h.song_id;
+            if (!habitsMap[id]) {
+              habitsMap[id] = { songId: id, songTitle: h.song_title, artist: h.artist, count: 0 };
+            }
+            habitsMap[id].count += 1;
+          });
+          setListeningHabits(Object.values(habitsMap));
+        }
+      } catch (err) {
+        console.warn("Failed loading user persistent database data:", err);
+      }
+    };
+
+    loadUserData();
+  }, [googleUser]);
 
   // Initialize Google Identity Services once when script is loaded
   useEffect(() => {
@@ -401,6 +486,8 @@ export default function App() {
     setIsPlaying(true);
     setProgress(0);
 
+    addNotification("success", `Now playing: ${song.title}`);
+
     // Register song in central songs state so Liked Songs and Playlists can reference it
     setSongs(prev => {
       if (prev.some(s => s.id === song.id)) return prev;
@@ -432,6 +519,41 @@ export default function App() {
       }
       return [...prev, { songId: song.id, songTitle: song.title, artist: song.artist, count: 1 }];
     });
+
+    // Persist listen event to the database
+    if (googleUser && googleUser.id) {
+      const cleanSongId = song.id.startsWith("yt_") ? song.id.substring(3) : song.id;
+      fetch("/api/user/history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: googleUser.id,
+          songVideoId: cleanSongId,
+          title: song.title,
+          artist: song.artist,
+          coverUrl: song.coverUrl,
+          duration: song.duration,
+          durationSeconds: song.durationSeconds
+        })
+      })
+        .then(async () => {
+          // Reload habits
+          const historyRes = await fetch(`/api/user/history?userId=${googleUser.id}`);
+          if (historyRes.ok) {
+            const historyData = await historyRes.json();
+            const habitsMap: Record<string, any> = {};
+            historyData.forEach((h: any) => {
+              const id = 'yt_' + h.song_id;
+              if (!habitsMap[id]) {
+                habitsMap[id] = { songId: id, songTitle: h.song_title, artist: h.artist, count: 0 };
+              }
+              habitsMap[id].count += 1;
+            });
+            setListeningHabits(Object.values(habitsMap));
+          }
+        })
+        .catch(err => console.warn("Failed recording listen history:", err));
+    }
   };
 
   const onNextSong = () => {
@@ -474,13 +596,49 @@ export default function App() {
     setIsPlaying(!isPlaying);
   };
 
-  const handleToggleFavorite = (songId: string) => {
+  const handleToggleFavorite = async (songId: string) => {
+    const isFav = favorites.includes(songId);
+    const cleanSongId = songId.startsWith("yt_") ? songId.substring(3) : songId;
+    
+    // Find song info
+    const song = songs.find(s => s.id === songId) || currentSong;
+    if (!song) return;
+
+    // Optimistic UI updates
     setFavorites(prev => {
       if (prev.includes(songId)) {
+        addNotification("info", `Removed "${song.title}" from favorites`);
         return prev.filter(id => id !== songId);
       }
+      addNotification("success", `Added "${song.title}" to favorites`);
       return [...prev, songId];
     });
+
+    if (googleUser && googleUser.id) {
+      try {
+        if (isFav) {
+          await fetch(`/api/user/likes?userId=${googleUser.id}&songVideoId=${cleanSongId}`, {
+            method: "DELETE"
+          });
+        } else {
+          await fetch("/api/user/likes", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              userId: googleUser.id,
+              songVideoId: cleanSongId,
+              title: song.title,
+              artist: song.artist,
+              coverUrl: song.coverUrl,
+              duration: song.duration,
+              durationSeconds: song.durationSeconds
+            })
+          });
+        }
+      } catch (err) {
+        console.warn("Failed syncing favorite to database:", err);
+      }
+    }
   };
 
   const handleTrackQueueChange = (queue: Song[], startIdx: number, shuffle: boolean) => {
@@ -506,39 +664,150 @@ export default function App() {
     }
   };
 
-  const handleCreatePlaylist = (name: string, description: string, initialSongs: Song[] = []) => {
-    const newPL: Playlist = {
-      id: "pl_" + Date.now(),
-      name,
-      description,
-      isCustom: true,
-      songs: initialSongs,
-      coverUrl: "https://lh3.googleusercontent.com/aida-public/AB6AXuDesJQhVHAwD48gusRnhSWxi2Wr4Se4dXJ2dNzny1LFufaJZskiTKIqdRsCcw180iEcexkCxubLMpt4CcIn01QzrzbAYlyyb15lMkDwy5-w82vvPYCnV_jl4NM-ctTd-lFkGawRTWky4mNLUpivTYBXLAfZSQV9gpm3aj3biLnKxwR794EB0klNZ51Mhb8POyFyI7nJOnQzK_HMq2v-WEw3bkzEMEM_FExWR1qVHUfoli1rlhkB9Z783f5QAQq7Yuwt9FXFr6tHk1Q"
-    };
-    setPlaylists(prev => [...prev, newPL]);
+  const handleCreatePlaylist = async (name: string, description: string, initialSongs: Song[] = []) => {
+    addNotification("success", `Created playlist "${name}"`);
+
+    if (!googleUser || !googleUser.id) {
+      // Fallback local-only creation for guests
+      const newPL: Playlist = {
+        id: "pl_" + Date.now(),
+        name,
+        description,
+        isCustom: true,
+        songs: initialSongs,
+        coverUrl: "https://lh3.googleusercontent.com/aida-public/AB6AXuDesJQhVHAwD48gusRnhSWxi2Wr4Se4dXJ2dNzny1LFufaJZskiTKIqdRsCcw180iEcexkCxubLMpt4CcIn01QzrzbAYlyyb15lMkDwy5-w82vvPYCnV_jl4NM-ctTd-lFkGawRTWky4mNLUpivTYBXLAfZSQV9gpm3aj3biLnKxwR794EB0klNZ51Mhb8POyFyI7nJOnQzK_HMq2v-WEw3bkzEMEM_FExWR1qVHUfoli1rlhkB9Z783f5QAQq7Yuwt9FXFr6tHk1Q"
+      };
+      setPlaylists(prev => [...prev, newPL]);
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/user/playlists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: googleUser.id,
+          name,
+          description,
+          coverUrl: "https://images.unsplash.com/photo-1614149162883-504ce4d13909?w=300"
+        })
+      });
+      if (res.ok) {
+        const newPLData = await res.json();
+        const playlistId = newPLData.id;
+        
+        // If there are initial songs, add them
+        if (initialSongs.length > 0) {
+          for (const song of initialSongs) {
+            const cleanSongId = song.id.startsWith("yt_") ? song.id.substring(3) : song.id;
+            await fetch("/api/user/playlists/songs", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                playlistId,
+                songVideoId: cleanSongId,
+                title: song.title,
+                artist: song.artist,
+                coverUrl: song.coverUrl,
+                duration: song.duration,
+                durationSeconds: song.durationSeconds
+              })
+            });
+          }
+        }
+
+        // Re-fetch playlists to get fully synced list
+        const plRes = await fetch(`/api/user/playlists?userId=${googleUser.id}`);
+        if (plRes.ok) {
+          const plData = await plRes.json();
+          setPlaylists(plData);
+        }
+      }
+    } catch (err) {
+      console.warn("Failed creating database playlist:", err);
+    }
   };
 
   const handleAddPlaylistDirect = (pl: Playlist) => {
     setPlaylists(prev => [...prev, pl]);
   };
 
-  const handleAddSongToPlaylist = (song: Song, playlistId: string) => {
-    setPlaylists(prev => prev.map(p => {
-      if (p.id === playlistId) {
-        if (p.songs.some(s => s.id === song.id)) return p; // prevent duplicates
-        return { ...p, songs: [...p.songs, song] };
+  const handleAddSongToPlaylist = async (song: Song, playlistId: string) => {
+    addNotification("success", `Added "${song.title}" to playlist`);
+
+    // Check if it's a guest local playlist
+    if (playlistId.startsWith("pl_")) {
+      setPlaylists(prev => prev.map(p => {
+        if (p.id === playlistId) {
+          if (p.songs.some(s => s.id === song.id)) return p;
+          return { ...p, songs: [...p.songs, song] };
+        }
+        return p;
+      }));
+      return;
+    }
+
+    if (!googleUser || !googleUser.id) return;
+
+    try {
+      const cleanSongId = song.id.startsWith("yt_") ? song.id.substring(3) : song.id;
+      const res = await fetch("/api/user/playlists/songs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          playlistId: parseInt(playlistId, 10),
+          songVideoId: cleanSongId,
+          title: song.title,
+          artist: song.artist,
+          coverUrl: song.coverUrl,
+          duration: song.duration,
+          durationSeconds: song.durationSeconds
+        })
+      });
+      if (res.ok) {
+        // Re-fetch playlists
+        const plRes = await fetch(`/api/user/playlists?userId=${googleUser.id}`);
+        if (plRes.ok) {
+          const plData = await plRes.json();
+          setPlaylists(plData);
+        }
       }
-      return p;
-    }));
+    } catch (err) {
+      console.warn("Failed adding song to database playlist:", err);
+    }
   };
 
-  const handleRemoveFromPlaylist = (songId: string, playlistId: string) => {
-    setPlaylists(prev => prev.map(p => {
-      if (p.id === playlistId) {
-        return { ...p, songs: p.songs.filter(s => s.id !== songId) };
+  const handleRemoveFromPlaylist = async (songId: string, playlistId: string) => {
+    addNotification("info", "Removed song from playlist");
+
+    if (playlistId.startsWith("pl_")) {
+      setPlaylists(prev => prev.map(p => {
+        if (p.id === playlistId) {
+          return { ...p, songs: p.songs.filter(s => s.id !== songId) };
+        }
+        return p;
+      }));
+      return;
+    }
+
+    if (!googleUser || !googleUser.id) return;
+
+    try {
+      const cleanSongId = songId.startsWith("yt_") ? songId.substring(3) : songId;
+      const res = await fetch(`/api/user/playlists/songs?playlistId=${playlistId}&songVideoId=${cleanSongId}`, {
+        method: "DELETE"
+      });
+      if (res.ok) {
+        // Re-fetch playlists
+        const plRes = await fetch(`/api/user/playlists?userId=${googleUser.id}`);
+        if (plRes.ok) {
+          const plData = await plRes.json();
+          setPlaylists(plData);
+        }
       }
-      return p;
-    }));
+    } catch (err) {
+      console.warn("Failed removing song from database playlist:", err);
+    }
   };
 
   const handleFollowUser = (target: string | null) => {
@@ -572,6 +841,57 @@ export default function App() {
         songCoverUrl: song.coverUrl
       })
     }).catch(err => console.warn("Simulated network feed trigger failed:", err));
+  };
+
+  // Equalizer & Queue helpers
+  const handleChangeBand = (idx: number, value: number) => {
+    setEqBands(prev => {
+      const copy = [...prev];
+      copy[idx] = value;
+      return copy;
+    });
+  };
+
+  const handleApplyPreset = (presetGains: number[]) => {
+    setEqBands(presetGains);
+    addNotification("info", "Applied Equalizer preset");
+  };
+
+  const handlePlayQueueIndex = (index: number) => {
+    if (musicQueue[index]) {
+      setQueueIndex(index);
+      setCurrentSong(musicQueue[index]);
+      setIsPlaying(true);
+      setProgress(0);
+      addNotification("success", `Playing from queue: ${musicQueue[index].title}`);
+    }
+  };
+
+  const handleRemoveQueueIndex = (index: number) => {
+    const removedSong = musicQueue[index];
+    setMusicQueue(prev => prev.filter((_, i) => i !== index));
+    if (removedSong) {
+      addNotification("info", `Removed "${removedSong.title}" from queue`);
+    }
+    if (queueIndex === index) {
+      onNextSong();
+    } else if (queueIndex > index) {
+      setQueueIndex(prev => prev - 1);
+    }
+  };
+
+  const handleClearQueue = () => {
+    setMusicQueue([]);
+    setQueueIndex(0);
+    addNotification("info", "Cleared music queue");
+  };
+
+  const handleMarkAllAsRead = () => {
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+  };
+
+  const handleClearAllNotifications = () => {
+    setNotifications([]);
   };
 
   // Derived Liked Songs matching
@@ -643,6 +963,8 @@ export default function App() {
             onToggleShuffle={() => setShuffleOn(!shuffleOn)}
             repeatOn={repeatOn}
             onToggleRepeat={() => setRepeatOn(!repeatOn)}
+            onOpenEqualizer={() => setIsEqualizerOpen(true)}
+            onOpenQueue={() => setIsQueueOpen(true)}
           />
         );
       case "profile":
@@ -669,7 +991,7 @@ export default function App() {
   return (
     <div id="melo-app" className="relative z-10 w-full max-w-[430px] md:max-w-[800px] lg:max-w-[1200px] mx-auto min-h-screen bg-mulberry-base text-mulberry-on flex flex-col justify-between selection:bg-mulberry-primary selection:text-mulberry-base font-sans shadow-[0_0_120px_rgba(0,0,0,0.9)] overflow-x-hidden md:border-x md:border-white/5">
       {/* Sound Engine Node (Browser Audio context oscillator synthesizer loop) */}
-      <AudioEngine isPlaying={isPlaying} songId={currentSong ? currentSong.id : null} />
+      <AudioEngine isPlaying={isPlaying} songId={currentSong ? currentSong.id : null} eqBands={eqBands} />
 
       {/* YouTube Player Node */}
       {currentSong && (currentSong.id.startsWith("yt_") || currentSong.videoId) && (
@@ -699,6 +1021,16 @@ export default function App() {
           <button className="font-sans text-[9px] font-bold text-[#FF007A] border border-[#FF007A]/22 rounded-full px-3 py-1 bg-[#FF007A]/10 tracking-wider hover:bg-[#FF007A]/20 transition-all active:scale-95">
             PLATINUM
           </button>
+          <button 
+            onClick={() => setIsNotificationsOpen(true)}
+            className="relative p-1.5 hover:bg-white/5 rounded-full transition-colors text-white/60 hover:text-white cursor-pointer"
+            aria-label="Open notifications"
+          >
+            <span className="text-sm">🔔</span>
+            {notifications.filter(n => !n.read).length > 0 && (
+              <span className="absolute top-0 right-0 w-2 h-2 bg-[#FF007A] rounded-full"></span>
+            )}
+          </button>
         </div>
       </header>
 
@@ -707,58 +1039,49 @@ export default function App() {
         {renderTabContent()}
       </main>
 
-      {/* Micro playing footer drawer bar (Only visible if a song has been setup, hide on playing active tab to avoid clutter) */}
+      {/* Mini Player */}
       {currentSong && activeTab !== "playing" && (
-        <div className="fixed bottom-16 md:bottom-20 left-1/2 transform -translate-x-1/2 w-full max-w-[430px] md:max-w-[700px] bg-mulberry-dark/96 backdrop-blur-xl p-3 border-t md:border border-white/5 md:rounded-2xl z-40 flex items-center justify-between gap-4 animate-fade-in silver-edge select-none cursor-pointer" onClick={() => setActiveTab("playing")}>
-          <div className="flex items-center gap-3 min-w-0 flex-1">
-            <img
-              src={currentSong.coverUrl}
-              alt={currentSong.title}
-              className="w-10 h-10 rounded-lg object-cover silver-edge"
-            />
-            <div className="min-w-0 text-left">
-              <h5 className="font-serif text-xs font-bold text-mulberry-on truncate leading-snug">
-                {currentSong.title}
-              </h5>
-              <p className="font-sans text-[10px] text-mulberry-on-variant truncate flex items-center gap-1">
-                <span>{currentSong.artist}</span>
-                {followingTarget && (
-                  <span className="text-emerald-400 font-mono text-[8px] uppercase tracking-normal">
-                    (Sync)
-                  </span>
-                )}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
-            <button
-              onClick={handleTogglePlay}
-              aria-label={isPlaying ? "Pause current song" : "Play current song"}
-              className="w-9 h-9 rounded-full bg-mulberry-primary text-mulberry-base flex items-center justify-center hover:scale-105 active:scale-95 transition-transform"
-            >
-              {isPlaying ? (
-                <Pause className="w-4.5 h-4.5 fill-current" />
-              ) : (
-                <Play className="w-4.5 h-4.5 fill-current ml-0.5" />
-              )}
-            </button>
-            <button
-              onClick={() => onNextSong()}
-              aria-label="Next song"
-              className="p-1 hover:bg-white/5 rounded-full text-mulberry-on"
-            >
-              <Play className="w-5 h-5 fill-current" />
-            </button>
-          </div>
-          <div className="absolute bottom-0 left-0 h-[2px] bg-[#FF007A]/20 w-full md:rounded-b-2xl">
-            <div
-              className="h-full bg-[#FF007A] transition-all duration-300"
-              style={{ width: `${currentSong.durationSeconds ? (progress / currentSong.durationSeconds) * 100 : 0}%` }}
-            ></div>
-          </div>
-        </div>
+        <MiniPlayer
+          currentSong={currentSong}
+          isPlaying={isPlaying}
+          onTogglePlay={() => setIsPlaying(p => !p)}
+          onNextSong={onNextSong}
+          progress={progress}
+          onClick={() => setActiveTab("playing")}
+          followingTarget={followingTarget}
+          isFavorite={favorites.includes(currentSong.id)}
+          onToggleFavorite={() => handleToggleFavorite(currentSong.id)}
+        />
       )}
+
+      {/* Queue Drawer Overlay */}
+      <QueuePanel
+        isOpen={isQueueOpen}
+        onClose={() => setIsQueueOpen(false)}
+        queue={musicQueue}
+        currentIndex={queueIndex}
+        onPlayIndex={handlePlayQueueIndex}
+        onRemoveIndex={handleRemoveQueueIndex}
+        onClearQueue={handleClearQueue}
+      />
+
+      {/* Equalizer Drawer Overlay */}
+      <Equalizer
+        isOpen={isEqualizerOpen}
+        onClose={() => setIsEqualizerOpen(false)}
+        eqBands={eqBands}
+        onChangeBand={handleChangeBand}
+        onApplyPreset={handleApplyPreset}
+      />
+
+      {/* Notifications Drawer Overlay */}
+      <Notifications
+        isOpen={isNotificationsOpen}
+        onClose={() => setIsNotificationsOpen(false)}
+        notifications={notifications}
+        onMarkAllAsRead={handleMarkAllAsRead}
+        onClearAll={handleClearAllNotifications}
+      />
 
       {/* BottomNavBar */}
       <nav className="fixed bottom-0 md:bottom-2 left-1/2 transform -translate-x-1/2 w-full max-w-[430px] md:max-w-[700px] z-50 flex justify-around items-center h-16 bg-[#080507]/92 backdrop-blur-xl border-t md:border border-white/5 md:rounded-2xl">

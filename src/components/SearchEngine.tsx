@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Search, X, Play, FolderPlus, History, Zap, Radio } from "lucide-react";
 import { Song } from "../types";
 
@@ -8,6 +8,7 @@ interface SearchEngineProps {
   playlists: { id: string; name: string }[];
   onAddSongToPlaylist: (song: Song, playlistId: string) => void;
   songs?: Song[];
+  userId: number | null;
 }
 
 type SearchSource = "database" | "youtube" | "fallback" | "none";
@@ -42,12 +43,18 @@ const QUICK_SEARCHES = [
 
 const MOODS = ["Melancholic", "Energetic", "Late-night", "Romantic", "Focus"];
 
+interface HistoryItem {
+  id: number;
+  query: string;
+}
+
 export function SearchEngine({
   onPlaySong,
   onAddSongToLibrary,
   playlists,
   onAddSongToPlaylist,
-  songs = []
+  songs = [],
+  userId
 }: SearchEngineProps) {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -55,9 +62,26 @@ export function SearchEngine({
   const [searched, setSearched] = useState(false);
   const [source, setSource] = useState<SearchSource>("none");
   const [limit, setLimit] = useState(10);
-  const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  const [recentSearches, setRecentSearches] = useState<HistoryItem[]>([]);
   const [showPlaylistMenuId, setShowPlaylistMenuId] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState("");
+
+  const fetchSearchHistory = async () => {
+    if (!userId) return;
+    try {
+      const res = await fetch(`/api/user/search-history?userId=${userId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setRecentSearches(data);
+      }
+    } catch (err) {
+      console.warn("Failed to fetch search history:", err);
+    }
+  };
+
+  useEffect(() => {
+    fetchSearchHistory();
+  }, [userId]);
 
   const runSearch = async (q: string, lim?: number) => {
     const activeQuery = q.trim();
@@ -69,8 +93,15 @@ export function SearchEngine({
     setStatusMsg("Checking library cache…");
     setResults([]);
 
-    if (!recentSearches.includes(activeQuery)) {
-      setRecentSearches(prev => [activeQuery, ...prev.slice(0, 5)]);
+    // Save search query to database
+    if (userId) {
+      fetch("/api/user/search-history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, query: activeQuery })
+      })
+        .then(() => fetchSearchHistory())
+        .catch(err => console.warn("Failed to save search history:", err));
     }
 
     try {
@@ -112,6 +143,18 @@ export function SearchEngine({
     setSearched(false);
     setSource("none");
     setStatusMsg("");
+  };
+
+  const handleDeleteHistoryItem = async (id: number) => {
+    if (!userId) return;
+    try {
+      await fetch(`/api/user/search-history?userId=${userId}&id=${id}`, {
+        method: "DELETE"
+      });
+      fetchSearchHistory();
+    } catch (err) {
+      console.warn("Failed to delete search history item:", err);
+    }
   };
 
   const badge = SOURCE_BADGE[source];
@@ -363,19 +406,19 @@ export function SearchEngine({
             <section className="space-y-2">
               <h3 className="font-sans text-[8px] text-white/30 uppercase tracking-widest font-semibold">Recent</h3>
               <div className="space-y-0.5">
-                {recentSearches.map((term, i) => (
+                {recentSearches.map((item) => (
                   <div
-                    key={i}
-                    onClick={() => { setQuery(term); runSearch(term); }}
+                    key={item.id}
+                    onClick={() => { setQuery(item.query); runSearch(item.query); }}
                     className="flex items-center justify-between text-[10px] text-white/50 hover:text-[#FF007A] transition-colors cursor-pointer py-1.5 border-b border-white/5 group"
                   >
                     <div className="flex items-center gap-2">
                       <History className="w-3 h-3 opacity-30" />
-                      <span>{term}</span>
+                      <span>{item.query}</span>
                     </div>
                     <button
                       type="button"
-                      onClick={e => { e.stopPropagation(); setRecentSearches(prev => prev.filter((_, j) => j !== i)); }}
+                      onClick={e => { e.stopPropagation(); handleDeleteHistoryItem(item.id); }}
                       className="text-white/20 hover:text-white/60 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                     >
                       <X className="w-3 h-3" />
