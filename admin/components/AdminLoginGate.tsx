@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Shield, Key } from "lucide-react";
+import { Shield, Key, Mail } from "lucide-react";
 
 interface AdminLoginGateProps {
   onSuccess: (password: string, user: any) => void;
@@ -9,6 +9,7 @@ interface AdminLoginGateProps {
 
 export function AdminLoginGate({ onSuccess, isLoading, errorMsg }: AdminLoginGateProps) {
   const [password, setPassword] = useState("");
+  const [adminEmail, setAdminEmail] = useState("sky0wave01@gmail.com");
   const [googleUser, setGoogleUser] = useState<any>(null);
   const [showPasswordInput, setShowPasswordInput] = useState(false);
   const btnRef = useRef<HTMLDivElement>(null);
@@ -70,7 +71,19 @@ export function AdminLoginGate({ onSuccess, isLoading, errorMsg }: AdminLoginGat
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!password.trim()) return;
-    onSuccess(password.trim(), googleUser);
+    
+    let user = googleUser;
+    if (!user) {
+      const displayEmail = adminEmail.trim() || "sky0wave01@gmail.com";
+      const displayName = displayEmail.split("@")[0] || "Admin";
+      user = {
+        name: displayName,
+        email: displayEmail,
+        role: "admin",
+        picture: `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=FF007A&color=fff`
+      };
+    }
+    onSuccess(password.trim(), user);
   };
 
   return (
@@ -89,26 +102,26 @@ export function AdminLoginGate({ onSuccess, isLoading, errorMsg }: AdminLoginGat
         <div className="space-y-2">
           <h2 className="font-serif text-2xl font-bold tracking-wide text-white">Unlock Admin Vault</h2>
           <p className="text-xs text-white/50 leading-relaxed">
-            Authorized personnel only. Please sign in with your administrator Google account and enter the project vault password.
+            Authorized personnel only. Please sign in with your administrator Google account or enter your administrator credentials.
           </p>
         </div>
 
         {!showPasswordInput ? (
           <div className="flex flex-col items-center justify-center space-y-4 pt-4">
-            <span className="text-[10px] uppercase font-bold tracking-widest text-white/30">Step 1: Authenticate Profile</span>
+            <span className="text-[10px] uppercase font-bold tracking-widest text-white/30">Option 1: Authenticate Profile</span>
             <div ref={btnRef} />
             <button
               onClick={() => setShowPasswordInput(true)}
               className="text-[10px] text-white/40 hover:text-white/60 transition-colors underline cursor-pointer"
             >
-              Skip Google Sign-in (Use Password Only)
+              Option 2: Use Admin ID & Password
             </button>
           </div>
         ) : (
-          <form onSubmit={handleSubmit} className="space-y-4 pt-2">
-            <span className="text-[10px] uppercase font-bold tracking-widest text-white/30 block mb-2">Step 2: Enter Vault Secret</span>
+          <form onSubmit={handleSubmit} className="space-y-4 text-left">
+            <span className="text-[10px] uppercase font-bold tracking-widest text-white/30 block mb-2 text-center">Credentials Verification</span>
             
-            {googleUser && (
+            {googleUser ? (
               <div className="flex items-center gap-3 p-3 bg-white/5 border border-white/5 rounded-xl text-left mb-4">
                 {googleUser.picture && (
                   <img src={googleUser.picture} alt="" className="w-8 h-8 rounded-full border border-white/10" />
@@ -118,33 +131,52 @@ export function AdminLoginGate({ onSuccess, isLoading, errorMsg }: AdminLoginGat
                   <p className="text-[10px] text-white/40">{googleUser.email}</p>
                 </div>
               </div>
+            ) : (
+              <div className="space-y-3">
+                <label className="text-[10px] uppercase font-bold tracking-wider text-white/40 block">Admin ID (Email)</label>
+                <div className="relative">
+                  <Mail className="absolute left-3.5 top-3.5 w-4 h-4 text-white/30" />
+                  <input
+                    type="email"
+                    placeholder="sky0wave01@gmail.com"
+                    value={adminEmail}
+                    onChange={(e) => setAdminEmail(e.target.value)}
+                    className="w-full pl-10 pr-4 py-3.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white focus:outline-none focus:border-[#FF007A] transition-all font-sans"
+                    required
+                  />
+                </div>
+              </div>
             )}
 
-            <div className="relative">
-              <Key className="absolute left-3.5 top-3.5 w-4 h-4 text-white/30" />
-              <input
-                type="password"
-                placeholder="Vault Password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-10 pr-4 py-3.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white focus:outline-none focus:border-[#FF007A] transition-all font-sans"
-                autoFocus
-              />
+            <div className="space-y-3">
+              <label className="text-[10px] uppercase font-bold tracking-wider text-white/40 block">Vault Password</label>
+              <div className="relative">
+                <Key className="absolute left-3.5 top-3.5 w-4 h-4 text-white/30" />
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white focus:outline-none focus:border-[#FF007A] transition-all font-sans"
+                  autoFocus
+                  required
+                />
+              </div>
             </div>
 
             {errorMsg && (
-              <p className="text-[#FF007A] text-[10px] font-bold uppercase tracking-wider">{errorMsg}</p>
+              <p className="text-[#FF007A] text-[10px] font-bold uppercase tracking-wider text-center">{errorMsg}</p>
             )}
 
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full bg-[#FF007A] hover:bg-[#FF007A]/90 text-white font-sans text-xs font-bold uppercase tracking-wider py-4 rounded-xl transition-all shadow-lg shadow-[#FF007A]/15 cursor-pointer disabled:opacity-50"
+              className="w-full bg-[#FF007A] hover:bg-[#FF007A]/90 text-white font-sans text-xs font-bold uppercase tracking-wider py-4 rounded-xl transition-all shadow-lg shadow-[#FF007A]/15 cursor-pointer disabled:opacity-50 mt-2"
             >
               {isLoading ? "Unlocking Vault..." : "Authorize Admin Access"}
             </button>
             
-            {googleUser && (
+            <div className="text-center pt-2">
               <button
                 type="button"
                 onClick={() => {
@@ -153,9 +185,9 @@ export function AdminLoginGate({ onSuccess, isLoading, errorMsg }: AdminLoginGat
                 }}
                 className="text-[10px] text-white/40 hover:text-white/60 transition-colors cursor-pointer"
               >
-                Sign out of {googleUser.name}
+                {googleUser ? `Sign out of ${googleUser.name}` : "Back to Google Sign-in"}
               </button>
-            )}
+            </div>
           </form>
         )}
 
