@@ -51,7 +51,7 @@ export function AdminSidebar({ activeTab, setActiveTab, adminUser, onLogout }: A
             const isActive = activeTab === item.id;
             
             // Map labels to match user screenshot
-            let labelText = item.label;
+            let labelText: string = item.label;
             if (item.id === "users") labelText = "USERS & ROLES";
             else if (item.id === "songs") labelText = "SONG LIBRARY";
             else if (item.id === "cache") labelText = "SEARCH CACHE";

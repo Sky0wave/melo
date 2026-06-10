@@ -152,16 +152,6 @@ export default function App() {
     }, 5000);
   };
 
-  // Connect Media Session API for lock screen controls
-  useMediaSession({
-    currentSong,
-    isPlaying,
-    onTogglePlay: () => setIsPlaying(p => !p),
-    onNextSong,
-    onPreviousSong,
-    progress,
-    setProgress: handleSetProgress
-  });
 
   // Google OAuth State
   const [googleUser, setGoogleUser] = useState<any>(null);
@@ -596,6 +586,17 @@ export default function App() {
     setIsPlaying(!isPlaying);
   };
 
+  // Connect Media Session API for lock screen controls
+  useMediaSession({
+    currentSong,
+    isPlaying,
+    onTogglePlay: () => setIsPlaying(p => !p),
+    onNextSong,
+    onPreviousSong,
+    progress,
+    setProgress: handleSetProgress
+  });
+
   const handleToggleFavorite = async (songId: string) => {
     const isFav = favorites.includes(songId);
     const cleanSongId = songId.startsWith("yt_") ? songId.substring(3) : songId;
@@ -917,6 +918,7 @@ export default function App() {
       case "search":
         return (
           <SearchEngine
+            userId={googleUser?.id || null}
             onPlaySong={handlePlaySongDirectly}
             onAddSongToLibrary={handleAddSongToLibrary}
             playlists={playlists}
