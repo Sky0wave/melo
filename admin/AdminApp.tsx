@@ -20,6 +20,7 @@ export function AdminApp() {
   });
 
   const [activeTab, setActiveTab] = useState<AdminTab>("dashboard");
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [metrics, setMetrics] = useState<any>(null);
@@ -151,6 +152,7 @@ export function AdminApp() {
             activeUsersCount={metrics?.activeUsersCount || 0}
             activeUsers={metrics?.activeUsers || []}
             registeredUsers={metrics?.registeredUsers || []}
+            userListensRecent={metrics?.userListensRecent || []}
             isLoading={isLoading}
           />
         );
@@ -182,20 +184,53 @@ export function AdminApp() {
   };
 
   return (
-    <div className="flex h-screen bg-[#07060a] text-[#f0edf7] overflow-hidden">
-      {/* Sidebar */}
-      <AdminSidebar
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        adminUser={adminUser}
-        onLogout={handleLogout}
-      />
+    <div className="flex h-screen bg-[#07060a] text-[#f0edf7] overflow-hidden relative">
+      {/* Sidebar Overlay for Mobile */}
+      {isSidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
+      {/* Sidebar Container */}
+      <div
+        className={`fixed inset-y-0 left-0 z-50 lg:relative lg:z-0 transform ${
+          isSidebarOpen ? "translate-x-0" : "-translate-x-full"
+        } lg:translate-x-0 transition-transform duration-300 ease-in-out`}
+      >
+        <AdminSidebar
+          activeTab={activeTab}
+          setActiveTab={(tab) => {
+            setActiveTab(tab);
+            setIsSidebarOpen(false); // Close sidebar on mobile navigation
+          }}
+          adminUser={adminUser}
+          onLogout={handleLogout}
+        />
+      </div>
 
       {/* Main Container */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* Top Bar for Mobile */}
+        <header className="flex items-center justify-between px-8 py-5 bg-[#050406] border-b border-white/5 lg:hidden shrink-0">
+          <div className="flex items-center gap-3">
+            <span className="font-serif text-xl font-light tracking-[0.3em] text-[#c5a880]">MELO</span>
+            <span className="text-[8px] font-sans text-white/40 tracking-[0.2em] uppercase mt-0.5">ADMIN</span>
+          </div>
+          <button
+            onClick={() => setIsSidebarOpen(true)}
+            className="p-2.5 border border-white/10 hover:border-[#c5a880]/30 bg-white/3 hover:bg-[#c5a880]/5 rounded-xl text-white/60 hover:text-white transition-all duration-300 cursor-pointer"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
+        </header>
+
         {/* Content Area */}
-        <main className="flex-1 overflow-y-auto p-12 relative">
-          <div className="max-w-7xl mx-auto space-y-8">
+        <main className="flex-1 overflow-y-auto p-8 md:p-12 relative">
+          <div className="max-w-7xl mx-auto">
             {renderContent()}
           </div>
         </main>

@@ -185,6 +185,33 @@ export default function App() {
     }
   };
 
+  const handleGuestSignIn = async () => {
+    setIsAuthLoading(true);
+    try {
+      const res = await fetch("/api/auth/guest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+      });
+
+      if (!res.ok) {
+        throw new Error("Guest auth endpoint failed");
+      }
+
+      const data = await res.json();
+      if (data.success && data.user) {
+        setGoogleUser(data.user);
+        setUsername(data.user.name);
+        localStorage.setItem("melo_google_user", JSON.stringify(data.user));
+        addNotification("success", `Welcome, ${data.user.name}`);
+      }
+    } catch (err) {
+      console.error("[Guest Sign-In Error]", err);
+      addNotification("error", "Guest sign-in failed.");
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
+
   const handleSignOut = () => {
     setGoogleUser(null);
     setUsername("skywave_listener");
@@ -987,7 +1014,13 @@ export default function App() {
   };
 
   if (!googleUser) {
-    return <LoginScreen onSignIn={handleGoogleSignInResponse} isLoading={isAuthLoading} />;
+    return (
+      <LoginScreen
+        onSignIn={handleGoogleSignInResponse}
+        isLoading={isAuthLoading}
+        onGuestSignIn={handleGuestSignIn}
+      />
+    );
   }
 
   return (

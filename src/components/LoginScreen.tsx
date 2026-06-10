@@ -3,9 +3,10 @@ import { useEffect, useRef } from "react";
 interface LoginScreenProps {
   onSignIn: (response: any) => void;
   isLoading?: boolean;
+  onGuestSignIn?: () => void;
 }
 
-export function LoginScreen({ onSignIn, isLoading }: LoginScreenProps) {
+export function LoginScreen({ onSignIn, isLoading, onGuestSignIn }: LoginScreenProps) {
   const btnRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -56,7 +57,7 @@ export function LoginScreen({ onSignIn, isLoading }: LoginScreenProps) {
       <div className="absolute bottom-0 left-0 right-0 h-32 overflow-hidden pointer-events-none opacity-20">
         <svg viewBox="0 0 1440 128" preserveAspectRatio="none" className="w-full h-full">
           {Array.from({ length: 72 }).map((_, i) => {
-            const h = 20 + Math.sin(i * 0.4) * 30 + Math.sin(i * 0.15) * 40;
+            const h = Math.max(4, 20 + Math.sin(i * 0.4) * 30 + Math.sin(i * 0.15) * 40);
             return (
               <rect
                 key={i}
@@ -136,6 +137,15 @@ export function LoginScreen({ onSignIn, isLoading }: LoginScreenProps) {
               />
             )}
           </div>
+
+          {onGuestSignIn && (
+            <button
+              onClick={onGuestSignIn}
+              className="text-[11px] font-sans font-bold text-[#FF007A]/60 hover:text-[#FF007A] hover:underline uppercase tracking-widest transition-colors cursor-pointer mt-1"
+            >
+              Continue as Guest (Dev Bypass)
+            </button>
+          )}
 
           <p className="text-white/20 text-[10px] font-sans text-center leading-relaxed max-w-[220px]">
             By signing in, you agree to Melo's Terms of Service and Privacy Policy.

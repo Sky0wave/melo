@@ -1,10 +1,11 @@
-import { Pause, Play, Heart } from "lucide-react";
+import { Pause, Play, Heart, SkipBack, SkipForward } from "lucide-react";
 import { Song } from "../types";
 
 interface MiniPlayerProps {
   currentSong: Song;
   isPlaying: boolean;
   onTogglePlay: () => void;
+  onPreviousSong: () => void;
   onNextSong: () => void;
   progress: number;
   onClick: () => void;
@@ -17,6 +18,7 @@ export function MiniPlayer({
   currentSong,
   isPlaying,
   onTogglePlay,
+  onPreviousSong,
   onNextSong,
   progress,
   onClick,
@@ -58,14 +60,14 @@ export function MiniPlayer({
             {followingTarget && (
               <span className="text-emerald-400 font-mono text-[8px] uppercase tracking-normal">
                 (Sync)
-              </span>
+               </span>
             )}
           </p>
         </div>
       </div>
 
       {/* Controls */}
-      <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
+      <div className="flex items-center gap-2.5" onClick={(e) => e.stopPropagation()}>
         {/* Heart / Like Button */}
         <button
           onClick={onToggleFavorite}
@@ -79,6 +81,15 @@ export function MiniPlayer({
                 : "text-white/40 group-hover:text-white/60"
             }`}
           />
+        </button>
+
+        {/* Previous Song */}
+        <button
+          onClick={onPreviousSong}
+          aria-label="Previous song"
+          className="p-2 hover:bg-white/5 rounded-full text-white/60 hover:text-white transition-colors cursor-pointer"
+        >
+          <SkipBack className="w-4 h-4 fill-current" />
         </button>
 
         {/* Play/Pause */}
@@ -100,7 +111,7 @@ export function MiniPlayer({
           aria-label="Next song"
           className="p-2 hover:bg-white/5 rounded-full text-white/60 hover:text-white transition-colors cursor-pointer"
         >
-          <Play className="w-4.5 h-4.5 fill-current" />
+          <SkipForward className="w-4 h-4 fill-current" />
         </button>
       </div>
 

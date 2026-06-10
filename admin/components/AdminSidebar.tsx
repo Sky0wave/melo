@@ -22,7 +22,7 @@ export function AdminSidebar({ activeTab, setActiveTab, adminUser, onLogout }: A
     <aside className="w-72 bg-[#050406] border-r border-white/5 flex flex-col justify-between shrink-0 select-none">
       <div className="flex flex-col">
         {/* Top Header Logo */}
-        <div className="flex flex-col gap-4 px-8 py-8 border-b border-white/5">
+        <div className="flex flex-col gap-4 px-10 py-10 border-b border-white/5">
           <div className="flex items-center gap-3">
             <div>
               <span className="font-serif text-2xl font-light tracking-[0.3em] text-[#c5a880] block">MELO</span>
@@ -30,7 +30,7 @@ export function AdminSidebar({ activeTab, setActiveTab, adminUser, onLogout }: A
             </div>
           </div>
           <div className="self-start mt-1">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-[#c5a880]/10 border border-[#c5a880]/20 rounded-full font-mono text-[8px] text-[#c5a880] font-bold uppercase tracking-wider">
+            <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-[#c5a880]/10 border border-[#c5a880]/20 rounded-full font-mono text-[8px] text-[#c5a880] font-bold uppercase tracking-wider">
               <span className="w-1.5 h-1.5 rounded-full bg-[#c5a880] animate-pulse"></span>
               SYSTEM ONLINE
             </span>
@@ -38,14 +38,14 @@ export function AdminSidebar({ activeTab, setActiveTab, adminUser, onLogout }: A
         </div>
 
         {/* Navigation Section Label */}
-        <div className="px-8 pt-8 pb-3">
+        <div className="px-10 pt-10 pb-4">
           <span className="text-[10px] font-sans font-bold uppercase tracking-[0.2em] text-white/30 block">
             Navigation
           </span>
         </div>
 
         {/* Navigation Menu */}
-        <nav className="px-6 py-1 space-y-2">
+        <nav className="px-8 py-2 space-y-3">
           {menuItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
@@ -62,10 +62,10 @@ export function AdminSidebar({ activeTab, setActiveTab, adminUser, onLogout }: A
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
-                className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl font-sans text-[11px] font-bold tracking-[0.18em] uppercase transition-all duration-200 cursor-pointer ${
+                className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl font-sans text-[10px] font-bold tracking-[0.2em] uppercase transition-all duration-300 cursor-pointer ${
                   isActive
-                    ? "bg-[#c5a880]/10 text-[#c5a880] border border-[#c5a880]/20 shadow-md shadow-[#c5a880]/5"
-                    : "text-white/40 hover:text-white/70 hover:bg-white/5 border border-transparent"
+                    ? "bg-[#c5a880]/10 text-[#c5a880] border border-[#c5a880]/20 shadow-md shadow-[#c5a880]/5 scale-[1.02]"
+                    : "text-white/40 hover:text-white/80 hover:bg-white/5 border border-transparent hover:translate-x-1"
                 }`}
               >
                 <Icon className={`w-4 h-4 ${isActive ? "text-[#c5a880]" : "text-white/40"}`} />
@@ -77,7 +77,7 @@ export function AdminSidebar({ activeTab, setActiveTab, adminUser, onLogout }: A
       </div>
 
       {/* User profile footer with Logout */}
-      <div className="p-6 border-t border-white/5 bg-white/[0.01] flex flex-col gap-5">
+      <div className="p-8 border-t border-white/5 bg-white/[0.01] flex flex-col gap-6">
         <div className="flex items-center gap-3">
           {adminUser?.picture ? (
             <img
@@ -102,7 +102,7 @@ export function AdminSidebar({ activeTab, setActiveTab, adminUser, onLogout }: A
 
         <button
           onClick={onLogout}
-          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-white/10 hover:border-[#c5a880]/20 bg-white/5 hover:bg-[#c5a880]/5 text-white/60 hover:text-[#c5a880] font-sans text-[10px] font-bold uppercase tracking-[0.15em] transition-all cursor-pointer"
+          className="w-full flex items-center justify-center gap-2.5 py-3.5 rounded-2xl border border-white/10 hover:border-red-500/30 bg-white/3 hover:bg-red-500/5 text-white/60 hover:text-red-400 font-sans text-[10px] font-bold uppercase tracking-[0.18em] transition-all duration-300 cursor-pointer"
         >
           <LogOut className="w-3.5 h-3.5" />
           Lock Dashboard
