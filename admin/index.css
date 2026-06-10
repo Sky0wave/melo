@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Serif+Display&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap');
 @import "tailwindcss";
 
 /* Admin Panel Global Styles */
@@ -6,20 +6,32 @@
 
 :root {
   --admin-bg: #07060a;
-  --admin-sidebar: #0a090e;
-  --admin-surface: #0f0d14;
-  --admin-surface-2: #161323;
-  --admin-border: rgba(255,255,255,0.06);
-  --admin-accent: #FF007A;
-  --admin-accent-2: #7B2FFF;
+  --admin-sidebar: #050406;
+  --admin-surface: #0a090e;
+  --admin-surface-2: #0f0e14;
+  --admin-border: rgba(255,255,255,0.05);
+  --admin-accent: #c5a880;
+  --admin-accent-2: #8e785b;
   --admin-text: #f0edf7;
   --admin-text-muted: rgba(240,237,247,0.45);
-  --admin-text-faint: rgba(240,237,247,0.2);
+  --admin-text-faint: rgba(240,237,247,0.15);
   --admin-green: #10b981;
   --admin-blue: #3b82f6;
-  --admin-purple: #8b5cf6;
+  --admin-purple: #c5a880;
   --admin-amber: #f59e0b;
   --admin-red: #ef4444;
+}
+
+.font-serif {
+  font-family: 'Cormorant Garamond', Georgia, serif !important;
+}
+
+.font-sans {
+  font-family: 'Inter', sans-serif !important;
+}
+
+.font-mono {
+  font-family: 'JetBrains Mono', monospace !important;
 }
 
 html, body { height: 100%; background: var(--admin-bg); color: var(--admin-text); }

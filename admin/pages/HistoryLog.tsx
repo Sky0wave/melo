@@ -37,7 +37,7 @@ export function HistoryLog({ userListensDaily, userListensRecent, isLoading }: H
         {/* Daily play table */}
         <div className="xl:col-span-1 space-y-4">
           <h3 className="font-serif text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-            <Activity className="w-4 h-4 text-[#FF007A]" /> Daily Streams
+            <Activity className="w-4 h-4 text-[#c5a880]" /> Daily Streams
           </h3>
           <div className="glass-card overflow-hidden">
             <div className="overflow-x-auto">
@@ -114,7 +114,7 @@ export function HistoryLog({ userListensDaily, userListensRecent, isLoading }: H
                     userListensRecent.map((item, idx) => (
                       <tr key={idx} className="hover:bg-white/[0.01] transition-colors">
                         <td className="p-4 font-bold text-white">{item.username}</td>
-                        <td className="p-4 text-[#FF007A] font-serif">{item.song_title}</td>
+                        <td className="p-4 text-[#c5a880] font-serif">{item.song_title}</td>
                         <td className="p-4 text-white/70">{item.artist}</td>
                         <td className="p-4 text-white/40 font-mono text-[9px]">{item.timestamp}</td>
                       </tr>

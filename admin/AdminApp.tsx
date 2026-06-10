@@ -197,7 +197,7 @@ export function AdminApp() {
         <header className="h-16 border-b border-white/5 flex items-center justify-between px-8 shrink-0 select-none bg-[#0a090e]/50 backdrop-blur-sm z-10">
           <div className="flex items-center gap-2">
             <span className="font-mono text-[9px] uppercase tracking-widest text-white/30">System Node:</span>
-            <span className="font-mono text-[9px] text-[#FF007A] font-bold">ONLINE</span>
+            <span className="font-mono text-[9px] text-[#c5a880] font-bold">ONLINE</span>
           </div>
 
           <div className="flex items-center gap-4">

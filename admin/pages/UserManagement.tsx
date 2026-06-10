@@ -61,7 +61,7 @@ export function UserManagement({
             placeholder="Search users..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 bg-white/5 border border-white/10 rounded-xl text-xs text-white focus:outline-none focus:border-[#FF007A] transition-all font-sans"
+            className="w-full pl-9 pr-4 py-2 bg-white/5 border border-white/10 rounded-xl text-xs text-white focus:outline-none focus:border-[#c5a880] transition-all font-sans"
           />
         </div>
       </div>
@@ -119,7 +119,7 @@ export function UserManagement({
                           <p className="font-bold text-white truncate flex items-center gap-1.5">
                             {user.name}
                             {isSelf && (
-                              <span className="text-[7px] bg-white/5 text-[#FF007A] border border-[#FF007A]/30 rounded px-1.5 py-0.5 tracking-widest font-semibold uppercase">YOU</span>
+                              <span className="text-[7px] bg-white/5 text-[#c5a880] border border-[#c5a880]/30 rounded px-1.5 py-0.5 tracking-widest font-semibold uppercase">YOU</span>
                             )}
                           </p>
                           <p className="text-[9px] text-white/30 font-mono">ID: {user.google_id || "Offline"}</p>
@@ -172,7 +172,7 @@ export function UserManagement({
                           onClick={() => onToggleRole(user.id, user.role)}
                           disabled={isSelf}
                           title="Toggle Admin Privilege"
-                          className="p-1.5 bg-white/5 hover:bg-[#FF007A]/10 text-white hover:text-[#FF007A] border border-white/5 rounded-lg transition-colors cursor-pointer inline-flex items-center justify-center disabled:opacity-30 disabled:pointer-events-none"
+                          className="p-1.5 bg-white/5 hover:bg-[#c5a880]/10 text-white hover:text-[#c5a880] border border-white/5 rounded-lg transition-colors cursor-pointer inline-flex items-center justify-center disabled:opacity-30 disabled:pointer-events-none"
                         >
                           <UserCheck className="w-3.5 h-3.5" />
                         </button>

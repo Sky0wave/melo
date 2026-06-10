@@ -80,7 +80,7 @@ export function AdminLoginGate({ onSuccess, isLoading, errorMsg }: AdminLoginGat
         name: displayName,
         email: displayEmail,
         role: "admin",
-        picture: `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=FF007A&color=fff`
+        picture: `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=c5a880&color=fff`
       };
     }
     onSuccess(password.trim(), user);
@@ -90,13 +90,13 @@ export function AdminLoginGate({ onSuccess, isLoading, errorMsg }: AdminLoginGat
     <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center overflow-hidden bg-[#07060a]">
       {/* Glow Effects */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] rounded-full bg-[#FF007A]/5 blur-[120px]" />
+        <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] rounded-full bg-[#c5a880]/5 blur-[120px]" />
         <div className="absolute bottom-[-20%] right-[-10%] w-[500px] h-[500px] rounded-full bg-[#7B2FFF]/5 blur-[120px]" />
       </div>
 
       <div className="relative z-10 glass-card p-8 max-w-md w-full mx-4 text-center space-y-6 animate-slide-up">
-        <div className="mx-auto w-16 h-16 rounded-2xl bg-[#FF007A]/10 flex items-center justify-center border border-[#FF007A]/20 shadow-lg shadow-[#FF007A]/5">
-          <Shield className="w-8 h-8 text-[#FF007A] animate-pulse" />
+        <div className="mx-auto w-16 h-16 rounded-2xl bg-[#c5a880]/10 flex items-center justify-center border border-[#c5a880]/20 shadow-lg shadow-[#c5a880]/5">
+          <Shield className="w-8 h-8 text-[#c5a880] animate-pulse" />
         </div>
 
         <div className="space-y-2">
@@ -141,7 +141,7 @@ export function AdminLoginGate({ onSuccess, isLoading, errorMsg }: AdminLoginGat
                     placeholder="sky0wave01@gmail.com"
                     value={adminEmail}
                     onChange={(e) => setAdminEmail(e.target.value)}
-                    className="w-full pl-10 pr-4 py-3.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white focus:outline-none focus:border-[#FF007A] transition-all font-sans"
+                    className="w-full pl-10 pr-4 py-3.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white focus:outline-none focus:border-[#c5a880] transition-all font-sans"
                     required
                   />
                 </div>
@@ -157,7 +157,7 @@ export function AdminLoginGate({ onSuccess, isLoading, errorMsg }: AdminLoginGat
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white focus:outline-none focus:border-[#FF007A] transition-all font-sans"
+                  className="w-full pl-10 pr-4 py-3.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white focus:outline-none focus:border-[#c5a880] transition-all font-sans"
                   autoFocus
                   required
                 />
@@ -165,13 +165,13 @@ export function AdminLoginGate({ onSuccess, isLoading, errorMsg }: AdminLoginGat
             </div>
 
             {errorMsg && (
-              <p className="text-[#FF007A] text-[10px] font-bold uppercase tracking-wider text-center">{errorMsg}</p>
+              <p className="text-[#c5a880] text-[10px] font-bold uppercase tracking-wider text-center">{errorMsg}</p>
             )}
 
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full bg-[#FF007A] hover:bg-[#FF007A]/90 text-white font-sans text-xs font-bold uppercase tracking-wider py-4 rounded-xl transition-all shadow-lg shadow-[#FF007A]/15 cursor-pointer disabled:opacity-50 mt-2"
+              className="w-full bg-[#c5a880] hover:bg-[#c5a880]/90 text-white font-sans text-xs font-bold uppercase tracking-wider py-4 rounded-xl transition-all shadow-lg shadow-[#c5a880]/15 cursor-pointer disabled:opacity-50 mt-2"
             >
               {isLoading ? "Unlocking Vault..." : "Authorize Admin Access"}
             </button>

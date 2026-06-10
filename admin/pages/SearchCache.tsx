@@ -126,7 +126,7 @@ export function SearchCache({ adminPassword }: SearchCacheProps) {
           placeholder="Filter query cache..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full pl-9 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-xs text-white focus:outline-none focus:border-[#FF007A] transition-all font-sans"
+          className="w-full pl-9 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-xs text-white focus:outline-none focus:border-[#c5a880] transition-all font-sans"
         />
       </div>
 
@@ -173,7 +173,7 @@ export function SearchCache({ adminPassword }: SearchCacheProps) {
 
                     {/* Count */}
                     <td className="p-4">
-                      <span className="px-2 py-0.5 rounded bg-[#FF007A]/10 text-[#FF007A] border border-[#FF007A]/20 text-[9px] font-bold">
+                      <span className="px-2 py-0.5 rounded bg-[#c5a880]/10 text-[#c5a880] border border-[#c5a880]/20 text-[9px] font-bold">
                         {item.video_ids.length} videos
                       </span>
                     </td>

@@ -105,12 +105,12 @@ export function SongLibrary({ adminPassword }: SongLibraryProps) {
               placeholder="Search cache library..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 bg-white/5 border border-white/10 rounded-xl text-xs text-white focus:outline-none focus:border-[#FF007A] transition-all font-sans"
+              className="w-full pl-9 pr-4 py-2 bg-white/5 border border-white/10 rounded-xl text-xs text-white focus:outline-none focus:border-[#c5a880] transition-all font-sans"
             />
           </div>
           <button
             type="submit"
-            className="px-4 py-2 bg-[#FF007A] text-white rounded-xl font-sans text-xs font-bold uppercase tracking-wider transition-all hover:bg-[#FF007A]/90 cursor-pointer"
+            className="px-4 py-2 bg-[#c5a880] text-white rounded-xl font-sans text-xs font-bold uppercase tracking-wider transition-all hover:bg-[#c5a880]/90 cursor-pointer"
           >
             Find
           </button>
@@ -183,7 +183,7 @@ export function SongLibrary({ adminPassword }: SongLibraryProps) {
                           href={`https://youtube.com/watch?v=${song.video_id}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-[#FF007A]/60 hover:text-[#FF007A] transition-colors"
+                          className="text-[#c5a880]/60 hover:text-[#c5a880] transition-colors"
                         >
                           <ExternalLink className="w-3 h-3" />
                         </a>
