@@ -7,20 +7,12 @@
       "destination": "/api/index.js"
     },
     {
-      "source": "/assets/(.*)",
-      "destination": "/dist/assets/$1"
-    },
-    {
-      "source": "/((?!api|admin|assets).*)",
-      "destination": "/dist/index.html"
-    },
-    {
       "source": "/admin",
-      "destination": "/dist/admin.html"
+      "destination": "/admin.html"
     },
     {
       "source": "/admin/(.*)",
-      "destination": "/dist/admin.html"
+      "destination": "/admin.html"
     }
   ],
   "env": {
