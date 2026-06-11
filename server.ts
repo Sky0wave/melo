@@ -102,6 +102,22 @@ async function setupDatabase() {
       );
     `);
     console.log("[DB Pool] ✅ user_search_history table ready");
+
+    // Create jams table if not exists
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS jams (
+        id SERIAL PRIMARY KEY,
+        room_id VARCHAR(10) UNIQUE NOT NULL,
+        password VARCHAR(255) NOT NULL,
+        creator_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        current_song_id VARCHAR(255),
+        current_song_progress INT NOT NULL DEFAULT 0,
+        current_song_is_playing BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log("[DB Pool] ✅ jams table ready");
   } catch (e: any) {
     console.warn("[DB Pool] ⚠️ Database setup failed (will retry on first request):", e.message);
   }
@@ -569,6 +585,138 @@ app.post("/api/sync/update", (req, res) => {
 // Return list of all active users
 app.get("/api/sync/users", (req, res) => {
   res.json(Array.from(ACTIVE_PLAYBACKS.values()));
+});
+
+// Create a new Jam Room
+app.post("/api/jams/create", async (req, res) => {
+  const { password, creatorId } = req.body;
+  if (!password || !creatorId) {
+    return res.status(400).json({ error: "Password and creatorId are required" });
+  }
+
+  try {
+    // Generate random 8 digit room ID
+    let roomId = "";
+    let isUnique = false;
+    while (!isUnique) {
+      roomId = Math.floor(10000000 + Math.random() * 90000000).toString();
+      const check = await pool.query("SELECT 1 FROM jams WHERE room_id = $1", [roomId]);
+      if (check.rows.length === 0) {
+        isUnique = true;
+      }
+    }
+
+    await pool.query(
+      `INSERT INTO jams (room_id, password, creator_id) VALUES ($1, $2, $3)`,
+      [roomId, password, creatorId]
+    );
+
+    console.log(`[Jam Room] Created room ${roomId} by creator ${creatorId}`);
+    res.json({ success: true, roomId });
+  } catch (err: any) {
+    console.error("[Jam Room] Create failed:", err.message);
+    res.status(500).json({ error: "Failed to create Jam Room", message: err.message });
+  }
+});
+
+// Join an existing Jam Room
+app.post("/api/jams/join", async (req, res) => {
+  const { roomId, password } = req.body;
+  if (!roomId || !password) {
+    return res.status(400).json({ error: "Room ID and Password are required" });
+  }
+
+  try {
+    const check = await pool.query("SELECT * FROM jams WHERE room_id = $1", [roomId]);
+    if (check.rows.length === 0) {
+      return res.status(404).json({ error: "Room not found" });
+    }
+
+    const jam = check.rows[0];
+    if (jam.password !== password) {
+      return res.status(401).json({ error: "Invalid password" });
+    }
+
+    res.json({
+      success: true,
+      jam: {
+        room_id: jam.room_id,
+        creator_id: jam.creator_id,
+        current_song_id: jam.current_song_id,
+        current_song_progress: jam.current_song_progress,
+        current_song_is_playing: jam.current_song_is_playing
+      }
+    });
+  } catch (err: any) {
+    console.error("[Jam Room] Join failed:", err.message);
+    res.status(500).json({ error: "Failed to join Jam Room", message: err.message });
+  }
+});
+
+// Update Jam Room playback state
+app.post("/api/jams/:roomId/update", async (req, res) => {
+  const { roomId } = req.params;
+  const { currentSongId, isPlaying, progress, songTitle, songArtist, songCoverUrl } = req.body;
+
+  try {
+    const check = await pool.query("SELECT * FROM jams WHERE room_id = $1", [roomId]);
+    if (check.rows.length === 0) {
+      return res.status(404).json({ error: "Room not found" });
+    }
+
+    await pool.query(
+      `UPDATE jams SET 
+        current_song_id = $1, 
+        current_song_is_playing = $2, 
+        current_song_progress = $3,
+        updated_at = CURRENT_TIMESTAMP
+       WHERE room_id = $4`,
+      [currentSongId, isPlaying, progress, roomId]
+    );
+
+    const updatedState = {
+      room_id: roomId,
+      current_song_id: currentSongId,
+      current_song_is_playing: isPlaying,
+      current_song_progress: progress,
+      songTitle,
+      songArtist,
+      songCoverUrl
+    };
+
+    broadcastUpdate("JAM_UPDATE", updatedState);
+
+    res.json({ success: true, jam: updatedState });
+  } catch (err: any) {
+    console.error("[Jam Room] Update failed:", err.message);
+    res.status(500).json({ error: "Failed to update Jam Room state", message: err.message });
+  }
+});
+
+// Get Jam Room State
+app.get("/api/jams/:roomId", async (req, res) => {
+  const { roomId } = req.params;
+  try {
+    const check = await pool.query("SELECT * FROM jams WHERE room_id = $1", [roomId]);
+    if (check.rows.length === 0) {
+      return res.status(404).json({ error: "Room not found" });
+    }
+
+    const jam = check.rows[0];
+    res.json({
+      success: true,
+      jam: {
+        room_id: jam.room_id,
+        creator_id: jam.creator_id,
+        current_song_id: jam.current_song_id,
+        current_song_progress: jam.current_song_progress,
+        current_song_is_playing: jam.current_song_is_playing
+      }
+    });
+  } catch (err: any) {
+    console.error("[Jam Room] Get failed:", err.message);
+    res.status(500).json({ error: "Failed to load Jam Room", message: err.message });
+  }
 });
 
 // SSE endpoint for live real-time streams

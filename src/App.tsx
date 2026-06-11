@@ -116,6 +116,119 @@ import { useMediaSession } from "./hooks/useMediaSession";
 
 const GOOGLE_CLIENT_ID = (import.meta as any).env.VITE_GOOGLE_CLIENT_ID || "950921906220-dt0pscki7erf5j27ahdqj33q01qnlbiv.apps.googleusercontent.com";
 
+function JamRoomForms({
+  onCreate,
+  onJoin,
+  onClose
+}: {
+  onCreate: (password: string) => Promise<string>;
+  onJoin: (roomId: string, password: string) => Promise<boolean>;
+  onClose: () => void;
+}) {
+  const [activeTab, setActiveTab] = useState<"join" | "create">("join");
+  const [roomId, setRoomId] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleJoinSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!roomId || !password) return;
+    setLoading(true);
+    await onJoin(roomId, password);
+    setLoading(false);
+  };
+
+  const handleCreateSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!password) return;
+    setLoading(true);
+    try {
+      await onCreate(password);
+    } catch (err) {}
+    setLoading(false);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Tabs selector */}
+      <div className="flex bg-white/5 p-1 rounded-xl border border-white/5">
+        <button
+          onClick={() => setActiveTab("join")}
+          className={`flex-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
+            activeTab === "join" ? "bg-[#FF007A] text-white" : "text-white/50 hover:text-white/80"
+          }`}
+        >
+          Join Room
+        </button>
+        <button
+          onClick={() => setActiveTab("create")}
+          className={`flex-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
+            activeTab === "create" ? "bg-[#FF007A] text-white" : "text-white/50 hover:text-white/80"
+          }`}
+        >
+          Create Room
+        </button>
+      </div>
+
+      {activeTab === "join" ? (
+        <form onSubmit={handleJoinSubmit} className="space-y-4">
+          <div className="space-y-1 text-left">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-white/40 block">Room ID</label>
+            <input
+              type="text"
+              placeholder="e.g. 87654321"
+              maxLength={8}
+              value={roomId}
+              onChange={(e) => setRoomId(e.target.value.replace(/\D/g, ""))}
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-[#FF007A]/50 transition-colors"
+            />
+          </div>
+
+          <div className="space-y-1 text-left">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-white/40 block">Password</label>
+            <input
+              type="password"
+              placeholder="Room password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-[#FF007A]/50 transition-colors"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading || roomId.length !== 8 || !password}
+            className="w-full py-3 bg-[#FF007A] hover:bg-[#FF007A]/90 disabled:opacity-50 text-white rounded-xl font-sans text-xs font-bold uppercase tracking-widest transition-colors cursor-pointer"
+          >
+            {loading ? "Joining..." : "Join Jam Room"}
+          </button>
+        </form>
+      ) : (
+        <form onSubmit={handleCreateSubmit} className="space-y-4">
+          <div className="space-y-1 text-left">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-white/40 block">Create Password</label>
+            <input
+              type="password"
+              placeholder="Enter password for guests"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-[#FF007A]/50 transition-colors"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading || !password}
+            className="w-full py-3 bg-[#FF007A] hover:bg-[#FF007A]/90 disabled:opacity-50 text-white rounded-xl font-sans text-xs font-bold uppercase tracking-widest transition-colors cursor-pointer"
+          >
+            {loading ? "Creating..." : "Create Jam Room"}
+          </button>
+        </form>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState("home");
   const [songs, setSongs] = useState<Song[]>([]);
@@ -134,6 +247,7 @@ export default function App() {
   const [isQueueOpen, setIsQueueOpen] = useState(false);
   const [isEqualizerOpen, setIsEqualizerOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isJamModalOpen, setIsJamModalOpen] = useState(false);
   const [eqBands, setEqBands] = useState<number[]>([0, 0, 0, 0, 0]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
 
@@ -273,6 +387,27 @@ export default function App() {
             habitsMap[id].count += 1;
           });
           setListeningHabits(Object.values(habitsMap));
+
+          if (historyData.length > 0) {
+            const lastSong = historyData[0];
+            const lastSongId = 'yt_' + lastSong.song_id;
+            const matchedSong = {
+              id: lastSongId,
+              title: lastSong.song_title,
+              artist: lastSong.artist,
+              album: "Last Played",
+              duration: "03:00",
+              durationSeconds: 180,
+              genre: "Recent",
+              mood: "Recent",
+              lyrics: "",
+              coverUrl: `https://img.youtube.com/vi/${lastSong.song_id}/hqdefault.jpg`,
+              videoId: lastSong.song_id,
+              source: "youtube"
+            };
+            setCurrentSong(matchedSong);
+            setIsPlaying(false);
+          }
         }
       } catch (err) {
         console.warn("Failed loading user persistent database data:", err);
@@ -326,6 +461,24 @@ export default function App() {
   const [activeUsersOnNetwork, setActiveUsersOnNetwork] = useState<any[]>([]);
   const [followingTarget, setFollowingTarget] = useState<string | null>(null);
 
+  // Jam Room State
+  const [jamRoom, setJamRoom] = useState<{ room_id: string; isHost: boolean; creator_id: string } | null>(null);
+  const jamRoomRef = useRef<typeof jamRoom>(null);
+  const currentSongRef = useRef<Song | null>(null);
+  const progressRef = useRef<number>(0);
+
+  useEffect(() => {
+    jamRoomRef.current = jamRoom;
+  }, [jamRoom]);
+
+  useEffect(() => {
+    currentSongRef.current = currentSong;
+  }, [currentSong]);
+
+  useEffect(() => {
+    progressRef.current = progress;
+  }, [progress]);
+
   // Sync references to preserve positions without stale loops
   const followingTargetRef = useRef<string | null>(null);
   const presetSongsRef = useRef<Song[]>([]);
@@ -347,7 +500,7 @@ export default function App() {
         if (Array.isArray(data) && data.length > 0) {
           setSongs(data);
           setMusicQueue(data);
-          setCurrentSong(data[0]);
+          setCurrentSong(prev => prev || data[0]);
         }
       })
       .catch(err => console.warn("Failed fetching metadata presets:", err));
@@ -403,10 +556,25 @@ export default function App() {
           songCoverUrl: currentSong ? currentSong.coverUrl : undefined
         })
       }).catch(err => console.warn("Broadcasting play position to server failed:", err));
+
+      if (jamRoom && jamRoom.isHost) {
+        fetch(`/api/jams/${jamRoom.room_id}/update`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            currentSongId: currentSong ? currentSong.id : null,
+            isPlaying,
+            progress,
+            songTitle: currentSong ? currentSong.title : undefined,
+            songArtist: currentSong ? currentSong.artist : undefined,
+            songCoverUrl: currentSong ? currentSong.coverUrl : undefined
+          })
+        }).catch(err => console.warn("Broadcasting to Jam Room failed:", err));
+      }
     }, 1000);
 
     return () => clearTimeout(selfSyncUpdateTimer.current);
-  }, [username, currentSong, isPlaying, progress]);
+  }, [username, currentSong, isPlaying, progress, jamRoom]);
 
   // Submit listening history to database when a song starts playing or changes
   const lastRecordedSongId = useRef<string>("");
@@ -477,6 +645,66 @@ export default function App() {
                 setCurrentSong(artificialTrack);
                 setIsPlaying(u.isPlaying);
                 setProgress(u.progress);
+              }
+            } else {
+              setIsPlaying(false);
+            }
+          }
+        } else if (envelope.type === "JAM_UPDATE") {
+          const jam = envelope.data;
+          const currentRoom = jamRoomRef.current;
+          if (currentRoom && currentRoom.room_id === jam.room_id && !currentRoom.isHost) {
+            if (jam.current_song_id) {
+              const matchedPreset = presetSongsRef.current.find(s => s.id === jam.current_song_id);
+              if (matchedPreset) {
+                const curSong = currentSongRef.current;
+                const curProgress = progressRef.current;
+                if (curSong?.id !== matchedPreset.id) {
+                  setCurrentSong(matchedPreset);
+                }
+                setIsPlaying(jam.current_song_is_playing);
+                const drift = Math.abs(curProgress - jam.current_song_progress);
+                if (drift > 3) {
+                  setProgress(jam.current_song_progress);
+                  if (matchedPreset.id.startsWith("yt_") || matchedPreset.videoId) {
+                    setYtSeekTo(jam.current_song_progress);
+                    setTimeout(() => setYtSeekTo(null), 50);
+                  }
+                }
+              } else {
+                // Sourced from an AI prompt/search on host's side, formulate matching song wrapper
+                const artificialTrack: Song = {
+                  id: jam.current_song_id,
+                  title: jam.songTitle || "AI Sourced Jam Song",
+                  artist: jam.songArtist || "Unknown Artist",
+                  album: "Jam Session Library",
+                  duration: "03:00",
+                  durationSeconds: 180,
+                  genre: "Live Jam",
+                  mood: "Sync Flow",
+                  lyrics: "Sourced through the Jam Room.",
+                  coverUrl: jam.songCoverUrl || `https://img.youtube.com/vi/${jam.current_song_id.replace("yt_", "")}/hqdefault.jpg`
+                };
+                
+                setSongs(prev => {
+                  if (prev.some(p => p.id === artificialTrack.id)) return prev;
+                  return [artificialTrack, ...prev];
+                });
+                
+                const curSong = currentSongRef.current;
+                const curProgress = progressRef.current;
+                if (curSong?.id !== artificialTrack.id) {
+                  setCurrentSong(artificialTrack);
+                }
+                setIsPlaying(jam.current_song_is_playing);
+                const drift = Math.abs(curProgress - jam.current_song_progress);
+                if (drift > 3) {
+                  setProgress(jam.current_song_progress);
+                  if (artificialTrack.id.startsWith("yt_") || artificialTrack.videoId) {
+                    setYtSeekTo(jam.current_song_progress);
+                    setTimeout(() => setYtSeekTo(null), 50);
+                  }
+                }
               }
             } else {
               setIsPlaying(false);
@@ -853,6 +1081,78 @@ export default function App() {
     }
   };
 
+  const handleCreateJamRoom = async (password: string): Promise<string> => {
+    if (!googleUser) {
+      addNotification("warning", "Must be logged in to host a Jam Room");
+      throw new Error("Must be logged in to host a Jam Room");
+    }
+    try {
+      const res = await fetch("/api/jams/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password, creatorId: googleUser.id })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to create room");
+      }
+      const data = await res.json();
+      setJamRoom({
+        room_id: data.roomId,
+        isHost: true,
+        creator_id: String(googleUser.id)
+      });
+      addNotification("success", `Created Jam Room ${data.roomId}`);
+      return data.roomId;
+    } catch (err: any) {
+      addNotification("error", err.message || "Failed to create room");
+      throw err;
+    }
+  };
+
+  const handleJoinJamRoom = async (roomId: string, password: string): Promise<boolean> => {
+    try {
+      const res = await fetch("/api/jams/join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomId, password })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        addNotification("error", err.error || "Failed to join room");
+        return false;
+      }
+      const data = await res.json();
+      setJamRoom({
+        room_id: data.jam.room_id,
+        isHost: googleUser && String(googleUser.id) === String(data.jam.creator_id),
+        creator_id: String(data.jam.creator_id)
+      });
+      addNotification("success", `Joined Jam Room ${data.jam.room_id}`);
+
+      // Immediately sync with current jam playback state if any
+      if (data.jam.current_song_id) {
+        const matched = songs.find(s => s.id === data.jam.current_song_id);
+        if (matched) {
+          setCurrentSong(matched);
+          setIsPlaying(data.jam.current_song_is_playing);
+          setProgress(data.jam.current_song_progress);
+        }
+      }
+      return true;
+    } catch (err: any) {
+      addNotification("error", err.message || "Failed to join room");
+      return false;
+    }
+  };
+
+  const handleLeaveJamRoom = () => {
+    if (jamRoom) {
+      addNotification("info", `Left Jam Room ${jamRoom.room_id}`);
+      setJamRoom(null);
+    }
+  };
+
   // Sandboxed triggers allowing users to simulatedly shift another user's server properties
   const handleTriggerSimulatedState = (targetUsername: string, songIdx: number, activeState: boolean) => {
     const song = songs[songIdx] || songs[0];
@@ -1053,6 +1353,22 @@ export default function App() {
               SYNC
             </div>
           )}
+          {jamRoom ? (
+            <button
+              onClick={() => setIsJamModalOpen(true)}
+              className="flex items-center gap-1.5 px-2.5 py-0.5 bg-[#FF007A]/15 border border-[#FF007A]/40 rounded-full font-mono text-[8px] text-[#FF007A] font-bold animate-pulse cursor-pointer"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-[#FF007A]"></span>
+              JAM: {jamRoom.room_id}
+            </button>
+          ) : (
+            <button
+              onClick={() => setIsJamModalOpen(true)}
+              className="flex items-center gap-1.5 px-2.5 py-0.5 bg-white/5 border border-white/10 rounded-full font-mono text-[8px] text-white/75 font-semibold hover:bg-white/10 transition-colors cursor-pointer"
+            >
+              👥 JAM ROOM
+            </button>
+          )}
           <button className="font-sans text-[9px] font-bold text-[#FF007A] border border-[#FF007A]/22 rounded-full px-3 py-1 bg-[#FF007A]/10 tracking-wider hover:bg-[#FF007A]/20 transition-all active:scale-95">
             PLATINUM
           </button>
@@ -1117,6 +1433,76 @@ export default function App() {
         onMarkAllAsRead={handleMarkAllAsRead}
         onClearAll={handleClearAllNotifications}
       />
+
+      {/* Jam Room Modal Overlay */}
+      {isJamModalOpen && (
+        <div className="fixed inset-0 z-50 bg-[#080507]/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-[#0f0b0d]/95 border border-white/10 rounded-3xl p-6 shadow-2xl relative overflow-hidden text-left">
+            {/* Ambient Background Glow */}
+            <div className="absolute -top-20 -left-20 w-48 h-48 bg-[#FF007A]/10 rounded-full blur-3xl pointer-events-none"></div>
+            <div className="absolute -bottom-20 -right-20 w-48 h-48 bg-purple-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+            <div className="flex justify-between items-center mb-6 relative z-10">
+              <h3 className="font-serif text-xl font-bold text-white flex items-center gap-2">
+                <span className="text-xl">👥</span> Jam Room Sync
+              </h3>
+              <button
+                onClick={() => setIsJamModalOpen(false)}
+                className="text-white/40 hover:text-white text-lg font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {jamRoom ? (
+              // Active Room View
+              <div className="space-y-6 relative z-10">
+                <div className="bg-white/5 border border-white/5 rounded-2xl p-5 text-center space-y-3">
+                  <div className="text-[10px] font-sans font-bold uppercase tracking-widest text-[#FF007A]">
+                    {jamRoom.isHost ? "You are hosting" : "You are listening"}
+                  </div>
+                  <div className="font-mono text-3xl font-bold text-white tracking-widest">
+                    {jamRoom.room_id.slice(0, 4)} {jamRoom.room_id.slice(4)}
+                  </div>
+                  <p className="text-[11px] text-white/50 leading-relaxed">
+                    {jamRoom.isHost 
+                      ? "Share this Room ID and your password with others. Anyone who joins will have their playback synchronized with yours in real time!" 
+                      : "Playback is synced to the host. Any track selection or seek made by the host will reflect in your app."}
+                  </p>
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(jamRoom.room_id);
+                      addNotification("success", "Room ID copied to clipboard!");
+                    }}
+                    className="flex-1 py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-xl font-sans text-xs font-bold uppercase tracking-widest transition-colors cursor-pointer"
+                  >
+                    Copy Room ID
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleLeaveJamRoom();
+                      setIsJamModalOpen(false);
+                    }}
+                    className="flex-1 py-3 bg-[#FF007A] hover:bg-[#FF007A]/90 text-white rounded-xl font-sans text-xs font-bold uppercase tracking-widest transition-colors cursor-pointer"
+                  >
+                    Leave Room
+                  </button>
+                </div>
+              </div>
+            ) : (
+              // Join / Create Forms
+              <JamRoomForms
+                onCreate={handleCreateJamRoom}
+                onJoin={handleJoinJamRoom}
+                onClose={() => setIsJamModalOpen(false)}
+              />
+            )}
+          </div>
+        </div>
+      )}
 
       {/* BottomNavBar */}
       <nav className="fixed bottom-0 md:bottom-2 left-1/2 transform -translate-x-1/2 w-full max-w-[430px] md:max-w-[700px] z-50 flex justify-around items-center h-16 bg-[#080507]/92 backdrop-blur-xl border-t md:border border-white/5 md:rounded-2xl">
