@@ -94,6 +94,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           id: matchedUser.id,
           name: matchedUser.name,
           email: matchedUser.email,
+          role: matchedUser.role || 'user',
           created_at: matchedUser.created_at
         };
 
@@ -145,6 +146,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           name,
           email: normalizedEmail,
           password_hash: password,
+          role: 'user' as const,
           created_at: new Date().toISOString()
         };
 
@@ -155,6 +157,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           id: newMockUser.id,
           name: newMockUser.name,
           email: newMockUser.email,
+          role: newMockUser.role,
           created_at: newMockUser.created_at
         };
 

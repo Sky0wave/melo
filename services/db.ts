@@ -81,6 +81,19 @@ export interface ListeningHistory {
   listened_at: string;
 }
 
+export interface Jam {
+  id: string;
+  room_id: string;
+  password?: string;
+  creator_id: string;
+  current_song_id?: string | null;
+  current_song_progress: number;
+  current_song_is_playing: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+
 // Default Seed Songs (matching UUIDs in database schema)
 export const SEED_SONGS: Song[] = [
   { id: 'f5b5f25a-4933-4f0e-be4c-0c1598f828a1', title: 'After Hours', artist: 'The Weeknd', youtube_url: 'https://www.youtube.com/watch?v=ygTZZpVNJ-Y' },
@@ -724,5 +737,99 @@ export const dbService = {
       }
       return allHistory;
     }
+  },
+
+  // ==========================================
+  // JAM ROOM APIS
+  // ==========================================
+  async createJam(roomId: string, password: string, creatorId: string): Promise<Jam> {
+    const jamData = {
+      room_id: roomId,
+      password,
+      creator_id: creatorId,
+      current_song_id: null,
+      current_song_progress: 0,
+      current_song_is_playing: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    if (isSupabaseConfigured) {
+      const { data, error } = await supabase
+        .from('jams')
+        .insert([jamData])
+        .select()
+        .single();
+      if (error) throw error;
+      return data as Jam;
+    } else {
+      const jamsStr = await AsyncStorage.getItem('mock_jams');
+      const jams: Jam[] = jamsStr ? JSON.parse(jamsStr) : [];
+      const newJam: Jam = {
+        id: Math.random().toString(36).substr(2, 9),
+        ...jamData
+      };
+      jams.push(newJam);
+      await AsyncStorage.setItem('mock_jams', JSON.stringify(jams));
+      return newJam;
+    }
+  },
+
+  async getJam(roomId: string): Promise<Jam | null> {
+    if (isSupabaseConfigured) {
+      const { data, error } = await supabase
+        .from('jams')
+        .select('*')
+        .eq('room_id', roomId)
+        .maybeSingle();
+      if (error) return null;
+      return data as Jam;
+    } else {
+      const jamsStr = await AsyncStorage.getItem('mock_jams');
+      const jams: Jam[] = jamsStr ? JSON.parse(jamsStr) : [];
+      const jam = jams.find(j => j.room_id === roomId);
+      return jam || null;
+    }
+  },
+
+  async updateJam(roomId: string, updates: Partial<Omit<Jam, 'id' | 'room_id' | 'creator_id'>>): Promise<void> {
+    const fullUpdates = {
+      ...updates,
+      updated_at: new Date().toISOString()
+    };
+
+    if (isSupabaseConfigured) {
+      const { error } = await supabase
+        .from('jams')
+        .update(fullUpdates)
+        .eq('room_id', roomId);
+      if (error) throw error;
+    } else {
+      const jamsStr = await AsyncStorage.getItem('mock_jams');
+      let jams: Jam[] = jamsStr ? JSON.parse(jamsStr) : [];
+      jams = jams.map(j => {
+        if (j.room_id === roomId) {
+          return { ...j, ...fullUpdates };
+        }
+        return j;
+      });
+      await AsyncStorage.setItem('mock_jams', JSON.stringify(jams));
+    }
+  },
+
+  async deleteJam(roomId: string): Promise<void> {
+    if (isSupabaseConfigured) {
+      const { error } = await supabase
+        .from('jams')
+        .delete()
+        .eq('room_id', roomId);
+      if (error) throw error;
+    } else {
+      const jamsStr = await AsyncStorage.getItem('mock_jams');
+      let jams: Jam[] = jamsStr ? JSON.parse(jamsStr) : [];
+      jams = jams.filter(j => j.room_id !== roomId);
+      await AsyncStorage.setItem('mock_jams', JSON.stringify(jams));
+    }
   }
 };
+

@@ -315,3 +315,55 @@ insert into public.songs (id, title, artist, youtube_url) values
 ('f5b5f25a-4933-4f0e-be4c-0c1598f828a7', 'Royals', 'Lorde', 'https://www.youtube.com/watch?v=nlcIKh6s868'),
 ('f5b5f25a-4933-4f0e-be4c-0c1598f828a8', 'Perfect Places', 'Lorde', 'https://www.youtube.com/watch?v=H74tC4s8lJ0')
 on conflict (id) do nothing;
+
+-- 13. CREATE JAMS TABLE (Jam rooms)
+create table if not exists public.jams (
+    id uuid default gen_random_uuid() primary key,
+    room_id text unique not null,
+    password text not null,
+    creator_id uuid references public.users(id) on delete cascade not null,
+    current_song_id uuid references public.songs(id) on delete set null,
+    current_song_progress integer default 0 not null,
+    current_song_is_playing boolean default false not null,
+    created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- Enable RLS for Jams
+alter table public.jams enable row level security;
+
+-- Jams policies:
+-- Anyone authenticated can read/join a jam
+create policy "Jams are viewable by authenticated users"
+on public.jams for select
+to authenticated
+using (true);
+
+-- Anyone authenticated can create a jam
+create policy "Authenticated users can create jams"
+on public.jams for insert
+to authenticated
+with check (auth.uid() = creator_id);
+
+-- Only the creator can update the jam state
+create policy "Only creator can update jam"
+on public.jams for update
+to authenticated
+using (auth.uid() = creator_id);
+
+-- Only the creator can delete the jam
+create policy "Only creator can delete jam"
+on public.jams for delete
+to authenticated
+using (auth.uid() = creator_id);
+
+-- Enable Supabase Realtime for jams table if not already added
+-- Note: We wrap in a do-block or run directly depending on permissions.
+begin;
+  -- Add table to publication if it exists
+  alter publication supabase_realtime add table public.jams;
+exception when others then
+  -- Do nothing if publication doesn't exist or table is already added
+end;
+commit;
+

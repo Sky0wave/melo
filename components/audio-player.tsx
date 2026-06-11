@@ -195,8 +195,9 @@ export function AudioPlayer() {
 
   // Add song to playlist
   const handleAddSongToPlaylist = async (playlistId: string, playlistName: string) => {
+    if (!user) return;
     try {
-      await dbService.addSongToPlaylist(playlistId, currentSong.id);
+      await dbService.addSongToPlaylist(user.id, playlistId, currentSong.id);
       Alert.alert('Added', `"${currentSong.title}" added to playlist "${playlistName}"`);
       setPlaylistsModalVisible(false);
     } catch (err) {
@@ -206,10 +207,10 @@ export function AudioPlayer() {
 
   // Create playlist and add song
   const handleCreatePlaylist = async () => {
-    if (!newPlaylistName.trim()) return;
+    if (!user || !newPlaylistName.trim()) return;
     try {
       const newPlaylist = await dbService.createPlaylist(user.id, newPlaylistName.trim());
-      await dbService.addSongToPlaylist(newPlaylist.id, currentSong.id);
+      await dbService.addSongToPlaylist(user.id, newPlaylist.id, currentSong.id);
       
       setNewPlaylistName('');
       setShowCreateInput(false);
