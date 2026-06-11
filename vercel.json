@@ -16,6 +16,26 @@
       "destination": "/admin.html"
     }
   ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    }
+  ],
   "env": {
     "DATABASE_URL": "postgresql://neondb_owner:npg_4voCarAhJU5c@ep-plain-river-aqgzx5dh.c-8.us-east-1.aws.neon.tech/neondb?sslmode=require",
     "YOUTUBE_API_KEY": "AIzaSyC4sVtmuCW0uCAQQcoH4RT8VwcbbLjL8zE",
