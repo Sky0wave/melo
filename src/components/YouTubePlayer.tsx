@@ -22,38 +22,58 @@ const ytApiReadyCallbacks: (() => void)[] = [];
 
 function loadYouTubeAPI(): Promise<void> {
   return new Promise((resolve) => {
-    if (ytApiLoaded && window.YT && window.YT.Player) {
+    if (window.YT && window.YT.Player) {
       resolve();
       return;
     }
 
     ytApiReadyCallbacks.push(resolve);
 
-    if (ytApiLoading) return;
+    if (ytApiLoading) {
+      const interval = setInterval(() => {
+        if (window.YT && window.YT.Player) {
+          clearInterval(interval);
+          ytApiLoaded = true;
+          ytApiReadyCallbacks.forEach((cb) => cb());
+          ytApiReadyCallbacks.length = 0;
+        }
+      }, 100);
+      return;
+    }
     ytApiLoading = true;
 
-    const existingScript = document.getElementById("yt-iframe-api");
-    if (existingScript) {
-      // Script tag exists but API may not be ready
+    let tag = document.getElementById("yt-iframe-api") as HTMLScriptElement | null;
+    if (!tag) {
+      tag = document.createElement("script");
+      tag.id = "yt-iframe-api";
+      tag.src = "https://www.youtube.com/iframe_api";
+      const firstScriptTag = document.getElementsByTagName("script")[0];
+      if (firstScriptTag && firstScriptTag.parentNode) {
+        firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+      } else {
+        document.head.appendChild(tag);
+      }
+    }
+
+    const checkReady = () => {
       if (window.YT && window.YT.Player) {
         ytApiLoaded = true;
         ytApiReadyCallbacks.forEach((cb) => cb());
         ytApiReadyCallbacks.length = 0;
+        return true;
       }
-      return;
-    }
-
-    const tag = document.createElement("script");
-    tag.id = "yt-iframe-api";
-    tag.src = "https://www.youtube.com/iframe_api";
-    const firstScriptTag = document.getElementsByTagName("script")[0];
-    firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
+      return false;
+    };
 
     window.onYouTubeIframeAPIReady = () => {
-      ytApiLoaded = true;
-      ytApiReadyCallbacks.forEach((cb) => cb());
-      ytApiReadyCallbacks.length = 0;
+      checkReady();
     };
+
+    const interval = setInterval(() => {
+      if (checkReady()) {
+        clearInterval(interval);
+      }
+    }, 100);
   });
 }
 

@@ -121,20 +121,24 @@ function JamRoomForms({
   onJoin,
   onClose
 }: {
-  onCreate: (password: string) => Promise<string>;
+  onCreate: (password: string, capacity: number) => Promise<string>;
   onJoin: (roomId: string, password: string) => Promise<boolean>;
   onClose: () => void;
 }) {
   const [activeTab, setActiveTab] = useState<"join" | "create">("join");
   const [roomId, setRoomId] = useState("");
   const [password, setPassword] = useState("");
+  const [capacity, setCapacity] = useState(10);
   const [loading, setLoading] = useState(false);
 
   const handleJoinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!roomId || !password) return;
     setLoading(true);
-    await onJoin(roomId, password);
+    const success = await onJoin(roomId, password);
+    if (success) {
+      onClose();
+    }
     setLoading(false);
   };
 
@@ -143,7 +147,10 @@ function JamRoomForms({
     if (!password) return;
     setLoading(true);
     try {
-      await onCreate(password);
+      const newRoomId = await onCreate(password, capacity);
+      if (newRoomId) {
+        onClose();
+      }
     } catch (err) {}
     setLoading(false);
   };
@@ -214,6 +221,21 @@ function JamRoomForms({
               onChange={(e) => setPassword(e.target.value)}
               className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-[#FF007A]/50 transition-colors"
             />
+          </div>
+
+          <div className="space-y-1 text-left">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-white/40 block">Room Size Capacity (2-10 users)</label>
+            <select
+              value={capacity}
+              onChange={(e) => setCapacity(parseInt(e.target.value, 10))}
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-[#FF007A]/50 transition-colors"
+            >
+              {[2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => (
+                <option key={num} value={num} className="bg-[#0f0b0d] text-white">
+                  {num} Users
+                </option>
+              ))}
+            </select>
           </div>
 
           <button
@@ -462,7 +484,7 @@ export default function App() {
   const [followingTarget, setFollowingTarget] = useState<string | null>(null);
 
   // Jam Room State
-  const [jamRoom, setJamRoom] = useState<{ room_id: string; isHost: boolean; creator_id: string } | null>(null);
+  const [jamRoom, setJamRoom] = useState<{ room_id: string; isHost: boolean; creator_id: string; password?: string } | null>(null);
   const jamRoomRef = useRef<typeof jamRoom>(null);
   const currentSongRef = useRef<Song | null>(null);
   const progressRef = useRef<number>(0);
@@ -553,7 +575,8 @@ export default function App() {
           progress,
           songTitle: currentSong ? currentSong.title : undefined,
           songArtist: currentSong ? currentSong.artist : undefined,
-          songCoverUrl: currentSong ? currentSong.coverUrl : undefined
+          songCoverUrl: currentSong ? currentSong.coverUrl : undefined,
+          roomId: jamRoom ? jamRoom.room_id : null
         })
       }).catch(err => console.warn("Broadcasting play position to server failed:", err));
 
@@ -683,9 +706,8 @@ export default function App() {
                   genre: "Live Jam",
                   mood: "Sync Flow",
                   lyrics: "Sourced through the Jam Room.",
-                  coverUrl: jam.songCoverUrl || `https://img.youtube.com/vi/${jam.current_song_id.replace("yt_", "")}/hqdefault.jpg`
-                };
-                
+                  coverUrl: jam.songCoverUrl || `https://img.youtube.com/vi/${jam.current_song_id.replace(/^(yt_)+/, "")}/hqdefault.jpg`
+                };                
                 setSongs(prev => {
                   if (prev.some(p => p.id === artificialTrack.id)) return prev;
                   return [artificialTrack, ...prev];
@@ -1081,7 +1103,7 @@ export default function App() {
     }
   };
 
-  const handleCreateJamRoom = async (password: string): Promise<string> => {
+  const handleCreateJamRoom = async (password: string, capacity: number): Promise<string> => {
     if (!googleUser) {
       addNotification("warning", "Must be logged in to host a Jam Room");
       throw new Error("Must be logged in to host a Jam Room");
@@ -1090,7 +1112,7 @@ export default function App() {
       const res = await fetch("/api/jams/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password, creatorId: googleUser.id })
+        body: JSON.stringify({ password, creatorId: googleUser.id, capacity })
       });
       if (!res.ok) {
         const err = await res.json();
@@ -1100,7 +1122,8 @@ export default function App() {
       setJamRoom({
         room_id: data.roomId,
         isHost: true,
-        creator_id: String(googleUser.id)
+        creator_id: String(googleUser.id),
+        password: password
       });
       addNotification("success", `Created Jam Room ${data.roomId}`);
       return data.roomId;
@@ -1112,10 +1135,11 @@ export default function App() {
 
   const handleJoinJamRoom = async (roomId: string, password: string): Promise<boolean> => {
     try {
+      const currentUsername = googleUser?.name || username || "Guest";
       const res = await fetch("/api/jams/join", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roomId, password })
+        body: JSON.stringify({ roomId, password, username: currentUsername })
       });
       if (!res.ok) {
         const err = await res.json();
@@ -1126,7 +1150,8 @@ export default function App() {
       setJamRoom({
         room_id: data.jam.room_id,
         isHost: googleUser && String(googleUser.id) === String(data.jam.creator_id),
-        creator_id: String(data.jam.creator_id)
+        creator_id: String(data.jam.creator_id),
+        password: password
       });
       addNotification("success", `Joined Jam Room ${data.jam.room_id}`);
 
@@ -1331,7 +1356,7 @@ export default function App() {
       {/* YouTube Player Node */}
       {currentSong && (currentSong.id.startsWith("yt_") || currentSong.videoId) && (
         <YouTubePlayer
-          videoId={currentSong.videoId || currentSong.id.replace("yt_", "")}
+          videoId={currentSong.videoId || currentSong.id.replace(/^(yt_)+/, "")}
           isPlaying={isPlaying}
           onTimeUpdate={(currentTime) => setProgress(Math.floor(currentTime))}
           onEnded={onNextSong}
@@ -1471,7 +1496,7 @@ export default function App() {
                   </p>
                 </div>
 
-                <div className="flex gap-3">
+                 <div className="flex gap-3">
                   <button
                     onClick={() => {
                       navigator.clipboard.writeText(jamRoom.room_id);
@@ -1486,11 +1511,18 @@ export default function App() {
                       handleLeaveJamRoom();
                       setIsJamModalOpen(false);
                     }}
-                    className="flex-1 py-3 bg-[#FF007A] hover:bg-[#FF007A]/90 text-white rounded-xl font-sans text-xs font-bold uppercase tracking-widest transition-colors cursor-pointer"
+                    className="flex-1 py-3 bg-[#FF007A]/20 hover:bg-[#FF007A]/30 border border-[#FF007A]/30 text-white rounded-xl font-sans text-xs font-bold uppercase tracking-widest transition-colors cursor-pointer"
                   >
                     Leave Room
                   </button>
                 </div>
+
+                <button
+                  onClick={() => setIsJamModalOpen(false)}
+                  className="w-full py-3.5 bg-gradient-to-r from-purple-600 to-[#FF007A] hover:opacity-95 text-white rounded-xl font-sans text-xs font-bold uppercase tracking-widest transition-opacity cursor-pointer shadow-[0_4px_15px_rgba(255,0,122,0.3)]"
+                >
+                  {jamRoom.isHost ? "Start Playing & Hosting" : "Start Listening & Syncing"}
+                </button>
               </div>
             ) : (
               // Join / Create Forms
@@ -1499,6 +1531,22 @@ export default function App() {
                 onJoin={handleJoinJamRoom}
                 onClose={() => setIsJamModalOpen(false)}
               />
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Floating Jam Room Info in bottom right */}
+      {jamRoom && (
+        <div className="fixed bottom-20 right-4 z-50 bg-[#0f0b0d]/95 border border-[#FF007A]/40 rounded-2xl p-3 shadow-[0_0_20px_rgba(255,0,122,0.15)] backdrop-blur-md text-left font-sans text-xs text-white">
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#FF007A] animate-ping"></span>
+            <span className="text-[9px] uppercase tracking-wider text-[#FF007A] font-bold">JAM SESSION</span>
+          </div>
+          <div className="font-mono text-[11px] space-y-0.5">
+            <div>ID: <span className="text-white font-bold select-all">{jamRoom.room_id}</span></div>
+            {jamRoom.password && (
+              <div>PASS: <span className="text-white/80 select-all">{jamRoom.password}</span></div>
             )}
           </div>
         </div>
@@ -1522,6 +1570,14 @@ export default function App() {
         >
           <span className="text-lg">⌕</span>
           <span className="text-[9px] uppercase tracking-wider mt-0.5">Search</span>
+        </button>
+
+        <button
+          onClick={() => setIsJamModalOpen(true)}
+          className={`flex flex-col items-center justify-center transition-all duration-200 cursor-pointer ${isJamModalOpen ? "text-[#FF007A]" : "text-white/40 hover:text-white/60"}`}
+        >
+          <span className="text-lg">👥</span>
+          <span className="text-[9px] uppercase tracking-wider mt-0.5">Jam</span>
         </button>
 
         <button

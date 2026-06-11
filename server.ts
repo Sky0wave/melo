@@ -109,7 +109,7 @@ async function setupDatabase() {
         id SERIAL PRIMARY KEY,
         room_id VARCHAR(10) UNIQUE NOT NULL,
         password VARCHAR(255) NOT NULL,
-        creator_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        creator_id INT NOT NULL,
         current_song_id VARCHAR(255),
         current_song_progress INT NOT NULL DEFAULT 0,
         current_song_is_playing BOOLEAN NOT NULL DEFAULT FALSE,
@@ -425,6 +425,7 @@ interface SyncState {
   songArtist?: string;
   songCoverUrl?: string;
   lastUpdated: number;
+  roomId?: string | null;
 }
 const ACTIVE_PLAYBACKS = new Map<string, SyncState>();
 
@@ -553,14 +554,14 @@ app.post("/api/listens", async (req, res) => {
 
 // Real-time Update API: receive player updates from individual users and broadcast them
 app.post("/api/sync/update", (req, res) => {
-  const { username, currentSongId, isPlaying, progress, songTitle, songArtist, songCoverUrl } = req.body;
+  const { username, currentSongId, isPlaying, progress, songTitle, songArtist, songCoverUrl, roomId } = req.body;
   if (!username) {
     return res.status(400).json({ error: "Username is required" });
   }
 
   // Auto-cache played song to Neon if it's from YouTube
   if (currentSongId && currentSongId.startsWith("yt_") && songTitle) {
-    const videoId = currentSongId.replace("yt_", "");
+    const videoId = currentSongId.replace(/^(yt_)+/, "");
     cacheToDb([{ videoId, title: songTitle, artist: songArtist || "YouTube Artist", coverUrl: songCoverUrl || "" }])
       .catch(err => console.error("[Sync] Auto-cache failed:", err.message));
   }
@@ -573,6 +574,7 @@ app.post("/api/sync/update", (req, res) => {
     songTitle,
     songArtist,
     songCoverUrl,
+    roomId,
     lastUpdated: Date.now()
   };
 
@@ -589,9 +591,15 @@ app.get("/api/sync/users", (req, res) => {
 
 // Create a new Jam Room
 app.post("/api/jams/create", async (req, res) => {
-  const { password, creatorId } = req.body;
+  const { password, creatorId, capacity } = req.body;
   if (!password || !creatorId) {
     return res.status(400).json({ error: "Password and creatorId are required" });
+  }
+
+  // Parse capacity limit, enforcing range [2, 10]
+  let maxUsers = 10;
+  if (typeof capacity === "number") {
+    maxUsers = Math.max(2, Math.min(10, capacity));
   }
 
   try {
@@ -607,11 +615,11 @@ app.post("/api/jams/create", async (req, res) => {
     }
 
     await pool.query(
-      `INSERT INTO jams (room_id, password, creator_id) VALUES ($1, $2, $3)`,
-      [roomId, password, creatorId]
+      `INSERT INTO jams (room_id, password, creator_id, max_users) VALUES ($1, $2, $3, $4)`,
+      [roomId, password, creatorId, maxUsers]
     );
 
-    console.log(`[Jam Room] Created room ${roomId} by creator ${creatorId}`);
+    console.log(`[Jam Room] Created room ${roomId} by creator ${creatorId} with capacity ${maxUsers}`);
     res.json({ success: true, roomId });
   } catch (err: any) {
     console.error("[Jam Room] Create failed:", err.message);
@@ -621,7 +629,7 @@ app.post("/api/jams/create", async (req, res) => {
 
 // Join an existing Jam Room
 app.post("/api/jams/join", async (req, res) => {
-  const { roomId, password } = req.body;
+  const { roomId, password, username } = req.body;
   if (!roomId || !password) {
     return res.status(400).json({ error: "Room ID and Password are required" });
   }
@@ -635,6 +643,19 @@ app.post("/api/jams/join", async (req, res) => {
     const jam = check.rows[0];
     if (jam.password !== password) {
       return res.status(401).json({ error: "Invalid password" });
+    }
+
+    // Check capacity limit
+    const maxUsers = jam.max_users || 10;
+    let activeCount = 0;
+    for (const [uname, state] of ACTIVE_PLAYBACKS.entries()) {
+      if (state.roomId === roomId && uname !== username) {
+        activeCount++;
+      }
+    }
+
+    if (activeCount >= maxUsers) {
+      return res.status(403).json({ error: `Room is full. Maximum capacity is ${maxUsers} users.` });
     }
 
     res.json({
