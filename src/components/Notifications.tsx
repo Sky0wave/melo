@@ -1,8 +1,8 @@
-import { X, Bell, Info, CheckCircle, AlertTriangle } from "lucide-react";
+import { X, Bell, Info, CheckCircle, AlertTriangle, XCircle } from "lucide-react";
 
 export interface NotificationItem {
   id: string;
-  type: "info" | "success" | "warning";
+  type: "info" | "success" | "warning" | "error";
   message: string;
   timestamp: string;
   read: boolean;
@@ -90,6 +90,8 @@ export function Notifications({
                     <CheckCircle className="w-4.5 h-4.5 text-emerald-400" />
                   ) : item.type === "warning" ? (
                     <AlertTriangle className="w-4.5 h-4.5 text-amber-400" />
+                  ) : item.type === "error" ? (
+                    <XCircle className="w-4.5 h-4.5 text-rose-500" />
                   ) : (
                     <Info className="w-4.5 h-4.5 text-sky-400" />
                   )}

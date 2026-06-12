@@ -173,3 +173,18 @@ body::before {
 .text-on-surface\/40 {
   color: rgba(255, 255, 255, 0.45) !important;
 }
+
+@keyframes slide-in {
+  from {
+    transform: translateY(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in {
+  animation: slide-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}

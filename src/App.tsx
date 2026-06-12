@@ -272,20 +272,23 @@ export default function App() {
   const [isJamModalOpen, setIsJamModalOpen] = useState(false);
   const [eqBands, setEqBands] = useState<number[]>([0, 0, 0, 0, 0]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [toasts, setToasts] = useState<NotificationItem[]>([]);
 
-  const addNotification = (type: "info" | "success" | "warning", message: string) => {
+  const addNotification = (type: "info" | "success" | "warning" | "error", message: string) => {
     const newNotif: NotificationItem = {
-      id: String(Date.now()),
+      id: String(Date.now() + Math.random()),
       type,
       message,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
       read: false
     };
     setNotifications(prev => [newNotif, ...prev]);
-    // Auto-dismiss toast style after 5s
+    setToasts(prev => [...prev, newNotif]);
+    
+    // Auto-dismiss toast after 4 seconds
     setTimeout(() => {
-      setNotifications(prev => prev.filter(n => n.id !== newNotif.id));
-    }, 5000);
+      setToasts(prev => prev.filter(t => t.id !== newNotif.id));
+    }, 4000);
   };
 
 
@@ -1554,6 +1557,50 @@ export default function App() {
         onMarkAllAsRead={handleMarkAllAsRead}
         onClearAll={handleClearAllNotifications}
       />
+
+      {/* Floating Toast Notification Popups */}
+      <div className="fixed top-5 right-5 z-[200] flex flex-col gap-2 pointer-events-none max-w-sm w-full">
+        {toasts.map(toast => {
+          const isError = toast.type === "error";
+          const isSuccess = toast.type === "success";
+          const isWarning = toast.type === "warning";
+          return (
+            <div
+              key={toast.id}
+              className={`pointer-events-auto p-3.5 rounded-xl border shadow-xl flex gap-3 text-left transition-all duration-300 animate-slide-in ${
+                isError
+                  ? "bg-rose-950/95 border-rose-500/30 text-white"
+                  : isSuccess
+                  ? "bg-emerald-950/95 border-emerald-500/30 text-white"
+                  : isWarning
+                  ? "bg-amber-950/95 border-amber-500/30 text-white"
+                  : "bg-mulberry-dark/95 border-white/10 text-white"
+              }`}
+            >
+              <div className="shrink-0 pt-0.5">
+                {isSuccess ? (
+                  <span className="text-emerald-400 font-bold">✓</span>
+                ) : isWarning ? (
+                  <span className="text-amber-400 font-bold">⚠</span>
+                ) : isError ? (
+                  <span className="text-rose-400 font-bold">✕</span>
+                ) : (
+                  <span className="text-sky-400 font-bold">ℹ</span>
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-sans leading-relaxed text-white/90">{toast.message}</p>
+              </div>
+              <button
+                onClick={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}
+                className="text-white/30 hover:text-white/70 p-1.5 rounded-full hover:bg-white/5 transition-all focus:outline-none h-fit self-center cursor-pointer"
+              >
+                <span className="text-[9px] font-sans font-bold">✕</span>
+              </button>
+            </div>
+          );
+        })}
+      </div>
 
       {/* Jam Room Modal Overlay */}
       {isJamModalOpen && (
