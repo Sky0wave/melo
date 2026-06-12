@@ -161,7 +161,7 @@ export function HomeFeed({
               <img
                 className="w-full h-full object-cover opacity-30 scale-105 group-hover:scale-100 transition-transform duration-1000"
                 alt="The Melo Midnight Sessions Theme"
-                src="https://images.unsplash.com/photo-1614680376593-902f74fa0d41?q=80&w=600&auto=format&fit=crop"
+                src="https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=800"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-[#080507] via-[#0f0b0d]/50 to-transparent"></div>
             </div>
