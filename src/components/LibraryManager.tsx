@@ -214,7 +214,7 @@ export function LibraryManager({
                   <img
                     alt="Liked Songs Art"
                     className="absolute inset-0 w-full h-full object-cover opacity-50 transition-transform duration-750 group-hover:scale-105"
-                    src="https://images.unsplash.com/photo-1614680376593-902f74fa0d41?q=80&w=600&auto=format&fit=crop"
+                    src="https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=600"
                   />
                   <div className="relative z-20 w-full flex justify-between items-end">
                     <div className="text-left">

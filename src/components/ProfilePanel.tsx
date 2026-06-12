@@ -154,6 +154,34 @@ export function ProfilePanel({
             )}
           </section>
 
+          {/* Mobile Application Download */}
+          <section className="glass-panel p-5 rounded-2xl border border-white/5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-serif text-xs font-bold text-white/80 flex items-center gap-1.5">
+                  <Smartphone className="w-3.5 h-3.5 text-[#FF007A]" />
+                  Melo Mobile Application
+                </h3>
+                <p className="font-sans text-[10px] text-white/40 mt-0.5">
+                  Download and install the Melo Android APK to listen with robust native background services and lock-screen support.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-4">
+              <a
+                href="/Melo.apk"
+                download
+                className="flex items-center gap-2 bg-[#FF007A]/10 hover:bg-[#FF007A]/20 border border-[#FF007A]/30 text-[#FF007A] px-4 py-2 rounded-xl font-sans text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer"
+              >
+                <Smartphone className="w-3.5 h-3.5" />
+                Download Android APK
+              </a>
+              <span className="text-white/45 font-sans text-[9px] uppercase tracking-wider">
+                v1.0.0 (Expo SDK 54)
+              </span>
+            </div>
+          </section>
+
           {/* Audio Preferences */}
           <section className="glass-panel rounded-xl overflow-hidden border border-white/5 divide-y divide-white/5">
 

@@ -32,6 +32,11 @@ interface ActivePlayerProps {
   // Equalizer & Queue Controls
   onOpenEqualizer: () => void;
   onOpenQueue: () => void;
+
+  // Jam properties
+  jamRoom: any;
+  chatMessages: any[];
+  onSendJamMessage: (text: string) => void;
 }
 
 interface LyricLine {
@@ -88,9 +93,13 @@ export function ActivePlayer({
   repeatOn,
   onToggleRepeat,
   onOpenEqualizer,
-  onOpenQueue
+  onOpenQueue,
+  jamRoom,
+  chatMessages,
+  onSendJamMessage
 }: ActivePlayerProps) {
-  const [activeTab, setActiveTab] = useState<"lyrics" | "sync" | "playlist">("lyrics");
+  const [activeTab, setActiveTab] = useState<"lyrics" | "chat" | "playlist">("lyrics");
+  const [newMessageText, setNewMessageText] = useState("");
   const [showSimControls, setShowSimControls] = useState(false);
   const [lyricsText, setLyricsText] = useState<string>("");
   const [lyricsLoading, setLyricsLoading] = useState(false);
@@ -416,7 +425,7 @@ export function ActivePlayer({
 
       {/* Tab Switcher for Details Deck */}
       <div className="flex bg-[#0f0b0d] p-1 rounded-full border border-white/5">
-        {(["lyrics", "sync", "playlist"] as const).map((tab) => (
+        {(["lyrics", "chat", "playlist"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -424,7 +433,7 @@ export function ActivePlayer({
               activeTab === tab ? "bg-[#FF007A] text-white" : "text-white/40 hover:text-white/60"
             }`}
           >
-            {tab === "lyrics" ? "Lyrics" : tab === "sync" ? "Sync Hub" : "Playlist"}
+            {tab === "lyrics" ? "Lyrics" : tab === "chat" ? "Jam Chat" : "Playlist"}
           </button>
         ))}
       </div>
@@ -473,92 +482,75 @@ export function ActivePlayer({
           </div>
         )}
 
-        {activeTab === "sync" && (
-          <div className="space-y-4">
-            <p className="text-[9px] text-white/40 leading-relaxed text-left">
-              Synchronize playback state, seconds-timestamp, and soundtracks live with other users on the network.
-            </p>
-
-            {/* Network listing */}
-            <div className="space-y-2">
-              {activeUsersOnNetwork.filter(u => u.username !== username).length === 0 ? (
-                <p className="text-[9px] italic text-white/30 py-2">
-                  No other active users. Open Melo in another window to test.
-                </p>
-              ) : (
-                activeUsersOnNetwork.filter(u => u.username !== username).map(user => {
-                  const isFollowed = followingTarget === user.username;
-                  return (
-                    <div 
-                      key={user.username}
-                      className={`p-2.5 rounded-xl flex items-center justify-between transition-all border ${
-                        isFollowed 
-                          ? "bg-[#FF007A]/5 border-[#FF007A]/20" 
-                          : "bg-white/5 border-transparent hover:bg-white/10"
-                      }`}
-                    >
-                      <div className="min-w-0 text-left">
-                        <span className="font-sans text-[10px] font-bold text-white block truncate">
-                          {user.username}
+        {activeTab === "chat" && (
+          <div className="flex flex-col h-[200px] border border-white/5 bg-white/[0.02] rounded-xl p-3">
+            {!jamRoom ? (
+              <div className="flex flex-col items-center justify-center h-full text-center py-4">
+                <Users className="w-8 h-8 mb-2 text-white/20" />
+                <p className="font-sans text-[10px] font-bold text-white/60">Jam Chat Offline</p>
+                <p className="font-sans text-[9px] text-white/30 mt-1 max-w-[200px]">Join or Host a Jam Room to chat with other listeners in real-time!</p>
+              </div>
+            ) : (
+              <div className="flex flex-col h-full">
+                <div className="flex justify-between items-center text-[9px] font-sans border-b border-white/5 pb-1.5 mb-1.5">
+                  <span className="text-[#FF007A] font-bold uppercase tracking-wider">ROOM: {jamRoom.room_id}</span>
+                  <span className="text-white/40">Active Chat</span>
+                </div>
+                
+                {/* Scrollable Chat Area */}
+                <div 
+                  className="flex-1 overflow-y-auto custom-scrollbar space-y-2 pr-1 mb-2 text-left"
+                  ref={(el) => {
+                    if (el) el.scrollTop = el.scrollHeight;
+                  }}
+                >
+                  {chatMessages.length === 0 ? (
+                    <p className="font-sans text-[9px] text-white/30 italic text-center py-4">
+                      No messages yet. Say hello!
+                    </p>
+                  ) : (
+                    chatMessages.map((msg, index) => (
+                      <div key={msg.id || index} className="bg-white/[0.03] border border-white/5 rounded-lg p-2">
+                        <span className="font-sans text-[9px] font-bold text-[#FF007A] block">
+                          {msg.username}
                         </span>
-                        <p className="text-[8px] text-white/45 truncate">
-                          {user.songTitle ? `Playing: ${user.songTitle}` : "Idle Space"}
+                        <p className="font-sans text-[10px] text-white/80 mt-0.5">
+                          {msg.message}
                         </p>
                       </div>
-                      <button
-                        onClick={() => onFollowUser(isFollowed ? null : user.username)}
-                        className={`font-sans text-[8px] font-bold uppercase tracking-wider px-3 py-1 rounded-full cursor-pointer transition-all ${
-                          isFollowed 
-                            ? "bg-[#FF007A] text-white" 
-                            : "bg-white/5 border border-white/5 text-white/60 hover:text-white"
-                        }`}
-                      >
-                        {isFollowed ? "Following" : "Sync"}
-                      </button>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-
-            {/* Sandbox Simulator */}
-            <div className="border border-white/5 bg-white/[0.02] p-3 rounded-xl space-y-2">
-              <div className="flex justify-between items-center text-[9px] font-sans">
-                <span className="text-white/40 font-bold uppercase tracking-wider">Sync Simulator</span>
-                <button 
-                  onClick={() => setShowSimControls(!showSimControls)}
-                  className="text-[#FF007A] font-bold uppercase cursor-pointer"
-                >
-                  {showSimControls ? "Hide" : "Show"}
-                </button>
-              </div>
-
-              {showSimControls && (
-                <div className="space-y-2 text-left pt-1">
-                  <p className="text-[8px] text-white/30 leading-normal">Simulate Aria or Julian's network broadcast state to verify sync handlers:</p>
-                  <div className="flex gap-1.5 flex-wrap">
-                    <button
-                      onClick={() => onTriggerSimulatedState("Aria Vance", 1, true)}
-                      className="bg-white/5 hover:bg-white/10 border border-white/5 text-[8px] font-bold text-white px-2.5 py-1 rounded-lg cursor-pointer transition-transform"
-                    >
-                      Aria: Play Track 2
-                    </button>
-                    <button
-                      onClick={() => onTriggerSimulatedState("Julian Thorne", 0, true)}
-                      className="bg-white/5 hover:bg-white/10 border border-white/5 text-[8px] font-bold text-white px-2.5 py-1 rounded-lg cursor-pointer transition-transform"
-                    >
-                      Julian: Play Track 1
-                    </button>
-                    <button
-                      onClick={() => onTriggerSimulatedState("Aria Vance", 0, false)}
-                      className="bg-white/5 hover:bg-white/10 border border-white/5 text-[8px] font-bold text-red-300 px-2.5 py-1 rounded-lg cursor-pointer transition-transform"
-                    >
-                      Aria: Pause
-                    </button>
-                  </div>
+                    ))
+                  )}
                 </div>
-              )}
-            </div>
+
+                {/* Input Area */}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Type a message..."
+                    value={newMessageText}
+                    onChange={(e) => setNewMessageText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && newMessageText.trim()) {
+                        onSendJamMessage(newMessageText);
+                        setNewMessageText("");
+                      }
+                    }}
+                    className="flex-1 bg-black/40 border border-white/10 rounded-lg px-2.5 py-1 text-[10px] text-white focus:outline-none focus:border-[#FF007A] font-sans"
+                  />
+                  <button
+                    onClick={() => {
+                      if (newMessageText.trim()) {
+                        onSendJamMessage(newMessageText);
+                        setNewMessageText("");
+                      }
+                    }}
+                    className="bg-[#FF007A] hover:bg-[#FF007A]/80 text-white px-3 py-1 rounded-lg text-[9px] font-sans font-bold uppercase cursor-pointer transition-colors"
+                  >
+                    Send
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

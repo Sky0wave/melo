@@ -3,7 +3,7 @@ import { Search, X, Play, FolderPlus, History, Zap, Radio } from "lucide-react";
 import { Song } from "../types";
 
 interface SearchEngineProps {
-  onPlaySong: (song: Song) => void;
+  onPlaySong: (song: Song, contextQueue?: Song[]) => void;
   onAddSongToLibrary: (song: Song) => void;
   playlists: { id: string; name: string }[];
   onAddSongToPlaylist: (song: Song, playlistId: string) => void;
@@ -67,7 +67,19 @@ export function SearchEngine({
   const [statusMsg, setStatusMsg] = useState("");
 
   const fetchSearchHistory = async () => {
-    if (!userId) return;
+    if (!userId) {
+      try {
+        const stored = localStorage.getItem("melo_search_history");
+        if (stored) {
+          setRecentSearches(JSON.parse(stored));
+        } else {
+          setRecentSearches([]);
+        }
+      } catch (e) {
+        setRecentSearches([]);
+      }
+      return;
+    }
     try {
       const res = await fetch(`/api/user/search-history?userId=${userId}`);
       if (res.ok) {
@@ -93,7 +105,7 @@ export function SearchEngine({
     setStatusMsg("Checking library cache…");
     setResults([]);
 
-    // Save search query to database
+    // Save search query to database or localStorage
     if (userId) {
       fetch("/api/user/search-history", {
         method: "POST",
@@ -102,6 +114,16 @@ export function SearchEngine({
       })
         .then(() => fetchSearchHistory())
         .catch(err => console.warn("Failed to save search history:", err));
+    } else {
+      try {
+        const stored = localStorage.getItem("melo_search_history");
+        let list = stored ? JSON.parse(stored) : [];
+        list = list.filter((item: any) => item.query !== activeQuery);
+        list.unshift({ id: Date.now(), query: activeQuery });
+        list = list.slice(0, 5);
+        localStorage.setItem("melo_search_history", JSON.stringify(list));
+        setRecentSearches(list);
+      } catch (e) {}
     }
 
     try {
@@ -146,7 +168,18 @@ export function SearchEngine({
   };
 
   const handleDeleteHistoryItem = async (id: number) => {
-    if (!userId) return;
+    if (!userId) {
+      try {
+        const stored = localStorage.getItem("melo_search_history");
+        if (stored) {
+          let list = JSON.parse(stored);
+          list = list.filter((item: any) => item.id !== id);
+          localStorage.setItem("melo_search_history", JSON.stringify(list));
+          setRecentSearches(list);
+        }
+      } catch (e) {}
+      return;
+    }
     try {
       await fetch(`/api/user/search-history?userId=${userId}&id=${id}`, {
         method: "DELETE"
@@ -266,7 +299,7 @@ export function SearchEngine({
                     <div
                       key={song.id}
                       id={`search-result-${i}`}
-                      onClick={() => onPlaySong(song)}
+                      onClick={() => onPlaySong(song, results)}
                       className="flex items-center justify-between p-2 hover:bg-white/5 rounded-xl transition-all border border-transparent hover:border-white/5 group cursor-pointer relative"
                     >
                       <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -343,6 +376,34 @@ export function SearchEngine({
           {/* Before search: quick searches & moods */}
           {!searched && !loading && (
             <div className="space-y-5">
+              {recentSearches.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-[9px] font-sans font-bold uppercase tracking-widest text-white/30">Recent Searches</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {recentSearches.map(item => (
+                      <div
+                        key={item.id}
+                        onClick={() => { setQuery(item.query); runSearch(item.query); }}
+                        className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/5 border border-white/5 text-[9px] font-sans text-white/60 hover:text-white hover:bg-white/10 hover:border-[#FF007A]/25 transition-all cursor-pointer group"
+                      >
+                        <History className="w-2.5 h-2.5 text-[#FF007A]/75 group-hover:text-[#FF007A] transition-colors" />
+                        <span>{item.query}</span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteHistoryItem(item.id);
+                          }}
+                          className="text-white/20 hover:text-white/60 p-0.5 ml-0.5 hover:bg-white/5 rounded-full transition-all"
+                        >
+                          <X className="w-2.5 h-2.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-2">
                 <p className="text-[9px] font-sans font-bold uppercase tracking-widest text-white/30">Quick Search</p>
                 <div className="flex flex-wrap gap-1.5">

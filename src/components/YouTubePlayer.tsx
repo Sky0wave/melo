@@ -7,6 +7,7 @@ interface YouTubePlayerProps {
   onEnded: () => void;
   onReady: () => void;
   seekTo?: number | null; // set externally to trigger a seek
+  onError?: (errorCode: number) => void;
 }
 
 declare global {
@@ -84,7 +85,9 @@ export function YouTubePlayer({
   onEnded,
   onReady,
   seekTo,
+  onError,
 }: YouTubePlayerProps) {
+  const cleanVideoId = videoId ? videoId.replace(/^(yt_)+/, "") : null;
   const playerRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number | null>(null);
@@ -119,7 +122,7 @@ export function YouTubePlayer({
 
   // Initialize YouTube player
   useEffect(() => {
-    if (!videoId) return;
+    if (!cleanVideoId) return;
 
     let destroyed = false;
 
@@ -129,9 +132,9 @@ export function YouTubePlayer({
 
       // If player already exists for the same container, just load new video
       if (playerRef.current && isPlayerReady.current) {
-        if (currentVideoIdRef.current !== videoId) {
-          currentVideoIdRef.current = videoId;
-          playerRef.current.loadVideoById(videoId);
+        if (currentVideoIdRef.current !== cleanVideoId) {
+          currentVideoIdRef.current = cleanVideoId;
+          playerRef.current.loadVideoById(cleanVideoId);
         }
         return;
       }
@@ -145,13 +148,13 @@ export function YouTubePlayer({
         isPlayerReady.current = false;
       }
 
-      currentVideoIdRef.current = videoId;
+      currentVideoIdRef.current = cleanVideoId;
 
       playerRef.current = new window.YT.Player("yt-player-container", {
         host: "https://www.youtube-nocookie.com",
-        height: "1",
-        width: "1",
-        videoId: videoId,
+        height: "200",
+        width: "200",
+        videoId: cleanVideoId,
         playerVars: {
           autoplay: 1,
           controls: 0,
@@ -191,6 +194,9 @@ export function YouTubePlayer({
           },
           onError: (event: any) => {
             console.error("YouTube Player error:", event.data);
+            if (onError) {
+              onError(event.data);
+            }
           },
         },
       });
@@ -201,10 +207,21 @@ export function YouTubePlayer({
     return () => {
       destroyed = true;
     };
-  }, [videoId]);
+  }, [cleanVideoId]);
 
   // Handle play/pause state changes
   useEffect(() => {
+    const silentAudio = document.getElementById("silent-audio-bg") as HTMLAudioElement;
+    if (silentAudio) {
+      if (isPlaying) {
+        silentAudio.play().catch((err) => {
+          console.warn("Silent audio play prevented:", err);
+        });
+      } else {
+        silentAudio.pause();
+      }
+    }
+
     if (!playerRef.current || !isPlayerReady.current) {
       if (isPlaying) pendingPlayRef.current = true;
       return;
@@ -224,12 +241,12 @@ export function YouTubePlayer({
 
   // Handle video ID changes when player is already ready
   useEffect(() => {
-    if (!videoId || !playerRef.current || !isPlayerReady.current) return;
-    if (currentVideoIdRef.current !== videoId) {
-      currentVideoIdRef.current = videoId;
-      playerRef.current.loadVideoById(videoId);
+    if (!cleanVideoId || !playerRef.current || !isPlayerReady.current) return;
+    if (currentVideoIdRef.current !== cleanVideoId) {
+      currentVideoIdRef.current = cleanVideoId;
+      playerRef.current.loadVideoById(cleanVideoId);
     }
-  }, [videoId]);
+  }, [cleanVideoId]);
 
   // Handle external seek requests
   useEffect(() => {
@@ -261,16 +278,22 @@ export function YouTubePlayer({
       ref={containerRef}
       style={{
         position: "fixed",
-        top: "-9999px",
-        left: "-9999px",
-        width: "1px",
-        height: "1px",
-        opacity: 0,
+        bottom: "10px",
+        right: "10px",
+        width: "200px",
+        height: "200px",
+        opacity: 0.01,
         pointerEvents: "none",
+        zIndex: -10,
         overflow: "hidden",
       }}
     >
       <div id="yt-player-container" />
+      <audio
+        id="silent-audio-bg"
+        loop
+        src="data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAAAG"
+      />
     </div>
   );
 }

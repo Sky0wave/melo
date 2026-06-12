@@ -29,6 +29,44 @@ async function setupDatabase() {
   try {
     await pool.query("SELECT 1");
     console.log("[DB Pool] ✅ Connection warm — checking tables");
+
+    // Create users table if not exists
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        google_id VARCHAR(255) UNIQUE,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        name VARCHAR(255),
+        picture VARCHAR(255),
+        role VARCHAR(50) DEFAULT 'user',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_login TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log("[DB Pool] ✅ users table ready");
+
+    // Ensure fallback user with ID 9999 exists for robust error/cold-start recovery
+    await pool.query(`
+      INSERT INTO users (id, google_id, email, name, picture, role)
+      VALUES (9999, 'fallback_id', 'fallback@melo.audio', 'Fallback User', '', 'user')
+      ON CONFLICT (id) DO NOTHING;
+    `);
+    console.log("[DB Pool] ✅ Fallback user (ID 9999) ready");
+
+    // Create songs table if not exists
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS songs (
+        id SERIAL PRIMARY KEY,
+        video_id VARCHAR(255) UNIQUE NOT NULL,
+        title VARCHAR(500) NOT NULL,
+        artist VARCHAR(300) NOT NULL,
+        duration VARCHAR(50) NOT NULL,
+        duration_seconds INT NOT NULL,
+        cover_url VARCHAR(500),
+        language VARCHAR(100)
+      );
+    `);
+    console.log("[DB Pool] ✅ songs table ready");
     
     // Create user_listens table if not exists
     await pool.query(`
@@ -43,6 +81,9 @@ async function setupDatabase() {
       );
     `);
     console.log("[DB Pool] ✅ user_listens table ready");
+
+    // Ensure username column exists in user_listens table for backwards compatibility
+    await pool.query("ALTER TABLE user_listens ADD COLUMN IF NOT EXISTS username VARCHAR(255) DEFAULT 'Google User'");
 
     // Create search_cache table if not exists
     await pool.query(`
@@ -118,6 +159,18 @@ async function setupDatabase() {
       );
     `);
     console.log("[DB Pool] ✅ jams table ready");
+
+    // Create jam_messages table if not exists
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS jam_messages (
+        id SERIAL PRIMARY KEY,
+        room_id VARCHAR(10) NOT NULL REFERENCES jams(room_id) ON DELETE CASCADE,
+        username VARCHAR(255) NOT NULL,
+        message TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log("[DB Pool] ✅ jam_messages table ready");
   } catch (e: any) {
     console.warn("[DB Pool] ⚠️ Database setup failed (will retry on first request):", e.message);
   }
@@ -128,7 +181,9 @@ setupDatabase();
 // ── Robust DB cache writer ───────────────────────────────────────────────────
 // Used by every search route. Retries once on transient errors, logs clearly.
 async function cacheToDb(songs: any[]): Promise<void> {
-  const valid = songs.filter(s => s.videoId && s.videoId.trim().length > 0);
+  const valid = songs
+    .filter(s => s.videoId && s.videoId.trim().length > 0)
+    .map(s => ({ ...s, videoId: s.videoId.replace(/^(yt_)+/, "") }));
   if (valid.length === 0) return;
 
   // Deduplicate songs by videoId within the same batch to avoid PostgreSQL cardinality errors
@@ -539,12 +594,13 @@ app.post("/api/listens", async (req, res) => {
   }
 
   const numericUserId = userId && userId !== 9999 ? (typeof userId === "string" ? parseInt(userId, 10) : userId) : null;
+  const cleanSongId = songId.replace(/^(yt_)+/, "");
 
   try {
     await pool.query(`
       INSERT INTO user_listens (user_id, username, song_id, song_title, artist, listened_at)
       VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
-    `, [numericUserId, username, songId, songTitle, artist]);
+    `, [numericUserId, username, cleanSongId, songTitle, artist]);
     res.json({ success: true });
   } catch (err: any) {
     console.error("[Listen Tracker] Error saving listen:", err.message);
@@ -737,6 +793,53 @@ app.get("/api/jams/:roomId", async (req, res) => {
   } catch (err: any) {
     console.error("[Jam Room] Get failed:", err.message);
     res.status(500).json({ error: "Failed to load Jam Room", message: err.message });
+  }
+});
+
+// Get Jam Room Chat Messages
+app.get("/api/jams/:roomId/messages", async (req, res) => {
+  const { roomId } = req.params;
+  try {
+    const dbResult = await pool.query(
+      "SELECT * FROM jam_messages WHERE room_id = $1 ORDER BY created_at ASC LIMIT 100",
+      [roomId]
+    );
+    res.json({ success: true, messages: dbResult.rows });
+  } catch (err: any) {
+    console.error("[Jam Chat] Failed to fetch messages:", err.message);
+    res.json({ success: true, messages: [] });
+  }
+});
+
+// Post Jam Room Chat Message
+app.post("/api/jams/:roomId/messages", async (req, res) => {
+  const { roomId } = req.params;
+  const { username, message } = req.body;
+  
+  if (!username || !message || !message.trim()) {
+    return res.status(400).json({ error: "username and message are required" });
+  }
+
+  const cleanMessage = message.trim();
+  const msgObj = {
+    room_id: roomId,
+    username,
+    message: cleanMessage,
+    created_at: new Date().toISOString()
+  };
+
+  try {
+    const dbResult = await pool.query(
+      "INSERT INTO jam_messages (room_id, username, message) VALUES ($1, $2, $3) RETURNING *",
+      [roomId, username, cleanMessage]
+    );
+    const savedMsg = dbResult.rows[0];
+    broadcastUpdate("JAM_MESSAGE", savedMsg);
+    res.json({ success: true, message: savedMsg });
+  } catch (err: any) {
+    console.warn("[Jam Chat] DB Save failed, broadcasting in memory:", err.message);
+    broadcastUpdate("JAM_MESSAGE", msgObj);
+    res.json({ success: true, message: msgObj });
   }
 });
 
@@ -1409,24 +1512,36 @@ app.post("/api/auth/guest", async (req, res) => {
     const picture = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150";
 
     let user;
-    try {
-      const existingUserResult = await pool.query(
-        "SELECT * FROM users WHERE email = $1",
-        [email]
-      );
+    let dbSuccess = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const existingUserResult = await pool.query(
+          "SELECT * FROM users WHERE email = $1",
+          [email]
+        );
 
-      if (existingUserResult.rows.length > 0) {
-        user = existingUserResult.rows[0];
-      } else {
-        const dbResult = await pool.query(`
-          INSERT INTO users (google_id, email, name, picture, role, last_login)
-          VALUES ($1, $2, $3, $4, 'admin', CURRENT_TIMESTAMP)
-          RETURNING *;
-        `, [googleId, email, name, picture]);
-        user = dbResult.rows[0];
+        if (existingUserResult.rows.length > 0) {
+          user = existingUserResult.rows[0];
+        } else {
+          const dbResult = await pool.query(`
+            INSERT INTO users (google_id, email, name, picture, role, last_login)
+            VALUES ($1, $2, $3, $4, 'admin', CURRENT_TIMESTAMP)
+            RETURNING *;
+          `, [googleId, email, name, picture]);
+          user = dbResult.rows[0];
+        }
+        dbSuccess = true;
+        break;
+      } catch (dbErr: any) {
+        console.warn(`[Guest Auth DB Attempt ${attempt} Warning] DB query failed:`, dbErr.message);
+        if (attempt < 3) {
+          await new Promise(resolve => setTimeout(resolve, 2000)); // wait 2s before retrying
+        }
       }
-    } catch (dbErr: any) {
-      console.warn("[Guest Auth Warning] Database query failed, using in-memory guest user:", dbErr.message);
+    }
+
+    if (!dbSuccess) {
+      console.warn("[Guest Auth Fallback] Database unreachable after retries, using in-memory guest user.");
       user = {
         id: 9999,
         google_id: googleId,
@@ -1476,7 +1591,7 @@ app.post("/api/auth/google", async (req, res) => {
       return res.status(403).json({ error: "Unauthorized Google Project token." });
     }
 
-    // 3. Upsert user in database with graceful fallback
+    // 3. Upsert user in database with graceful fallback and retry logic
     let user = {
       id: 9999,
       google_id: googleId,
@@ -1488,40 +1603,52 @@ app.post("/api/auth/google", async (req, res) => {
       last_login: new Date()
     };
 
-    try {
-      // 1. Try to find the user by email first to avoid unique constraint conflict on email
-      const existingUserResult = await pool.query(
-        "SELECT * FROM users WHERE email = $1",
-        [email]
-      );
+    let dbSuccess = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        // 1. Try to find the user by email first to avoid unique constraint conflict on email
+        const existingUserResult = await pool.query(
+          "SELECT * FROM users WHERE email = $1",
+          [email]
+        );
 
-      if (existingUserResult.rows.length > 0) {
-        // User exists with this email, update their google_id, name, picture, and last_login
-        const dbResult = await pool.query(`
-          UPDATE users
-          SET google_id = $1, name = $2, picture = $3, last_login = CURRENT_TIMESTAMP
-          WHERE email = $4
-          RETURNING *;
-        `, [googleId, name, picture, email]);
-        if (dbResult.rows.length > 0) {
-          user = dbResult.rows[0];
+        if (existingUserResult.rows.length > 0) {
+          // User exists with this email, update their google_id, name, picture, and last_login
+          const dbResult = await pool.query(`
+            UPDATE users
+            SET google_id = $1, name = $2, picture = $3, last_login = CURRENT_TIMESTAMP
+            WHERE email = $4
+            RETURNING *;
+          `, [googleId, name, picture, email]);
+          if (dbResult.rows.length > 0) {
+            user = dbResult.rows[0];
+          }
+        } else {
+          // User does not exist, insert them
+          const dbResult = await pool.query(`
+            INSERT INTO users (google_id, email, name, picture, last_login)
+            VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+            ON CONFLICT (google_id) DO UPDATE
+            SET email = $2, name = $3, picture = $4, last_login = CURRENT_TIMESTAMP
+            RETURNING *;
+          `, [googleId, email, name, picture]);
+          if (dbResult.rows.length > 0) {
+            user = dbResult.rows[0];
+          }
         }
-      } else {
-        // User does not exist, insert them
-        const dbResult = await pool.query(`
-          INSERT INTO users (google_id, email, name, picture, last_login)
-          VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-          ON CONFLICT (google_id) DO UPDATE
-          SET email = $2, name = $3, picture = $4, last_login = CURRENT_TIMESTAMP
-          RETURNING *;
-        `, [googleId, email, name, picture]);
-        if (dbResult.rows.length > 0) {
-          user = dbResult.rows[0];
+        dbSuccess = true;
+        console.log(`[Google Auth] User successfully authenticated via DB: ${email} (${user.role})`);
+        break;
+      } catch (dbErr: any) {
+        console.warn(`[Google Auth DB Attempt ${attempt} Warning] DB query failed:`, dbErr.message);
+        if (attempt < 3) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
         }
       }
-      console.log(`[Google Auth] User successfully authenticated via DB: ${email} (${user.role})`);
-    } catch (dbErr: any) {
-      console.warn(`[Google Auth DB Warning] Database unreachable. Using local user session. Error: ${dbErr.message}`);
+    }
+    
+    if (!dbSuccess) {
+      console.warn("[Google Auth Fallback] Database unreachable after retries. Using local user session.");
     }
     
     res.json({ success: true, user });
@@ -1861,9 +1988,10 @@ app.post("/api/user/likes", async (req, res) => {
   const { userId, videoId } = req.body;
   if (!userId || !videoId) return res.status(400).json({ error: "Missing fields" });
   try {
+    const cleanVideoId = videoId.replace(/^(yt_)+/, "");
     await pool.query(
       "INSERT INTO user_liked_songs (user_id, song_video_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-      [parseInt(userId, 10), videoId]
+      [parseInt(userId, 10), cleanVideoId]
     );
     res.json({ success: true });
   } catch (err: any) {
@@ -1876,9 +2004,10 @@ app.delete("/api/user/likes", async (req, res) => {
   const { videoId } = req.query;
   if (isNaN(userId) || !videoId) return res.status(400).json({ error: "Missing fields" });
   try {
+    const cleanVideoId = (videoId as string).replace(/^(yt_)+/, "");
     await pool.query(
       "DELETE FROM user_liked_songs WHERE user_id = $1 AND song_video_id = $2",
-      [userId, videoId]
+      [userId, cleanVideoId]
     );
     res.json({ success: true });
   } catch (err: any) {
@@ -1897,6 +2026,29 @@ app.get("/api/user/history", async (req, res) => {
     );
     res.json(rows);
   } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/user/history", async (req, res) => {
+  const { userId, songVideoId, title, artist } = req.body;
+  if (!userId || !songVideoId || !title || !artist) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+  try {
+    const cleanSongId = songVideoId.replace(/^(yt_)+/, "");
+    // Retrieve username if available
+    const userRes = await pool.query("SELECT name FROM users WHERE id = $1", [parseInt(userId, 10)]);
+    const username = userRes.rows[0]?.name || "Google User";
+
+    await pool.query(
+      `INSERT INTO user_listens (user_id, username, song_id, song_title, artist, listened_at)
+       VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)`,
+      [parseInt(userId, 10), username, cleanSongId, title, artist]
+    );
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error("[History Tracker] Error saving history:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -2031,14 +2183,25 @@ app.delete("/api/user/playlists/:id", async (req, res) => {
   }
 });
 
-app.post("/api/user/playlists/:id/songs", async (req, res) => {
-  const playlistId = parseInt(req.params.id, 10);
-  const { songVideoId } = req.body;
-  if (isNaN(playlistId) || !songVideoId) return res.status(400).json({ error: "Missing fields" });
+app.post("/api/user/playlists/songs", async (req, res) => {
+  const { playlistId, songVideoId, title, artist, coverUrl, duration, durationSeconds } = req.body;
+  if (!playlistId || !songVideoId) return res.status(400).json({ error: "Missing fields" });
   try {
+    const cleanSongId = songVideoId.replace(/^(yt_)+/, "");
+    // Cache the song details if provided
+    if (title) {
+      await cacheToDb([{
+        videoId: cleanSongId,
+        title,
+        artist: artist || "Unknown Artist",
+        coverUrl: coverUrl || `https://img.youtube.com/vi/${cleanSongId}/hqdefault.jpg`,
+        duration: duration || "03:00",
+        durationSeconds: durationSeconds || 180
+      }]);
+    }
     await pool.query(
       "INSERT INTO user_playlist_songs (playlist_id, song_video_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-      [playlistId, songVideoId]
+      [parseInt(playlistId, 10), cleanSongId]
     );
     res.json({ success: true });
   } catch (err: any) {
@@ -2046,14 +2209,15 @@ app.post("/api/user/playlists/:id/songs", async (req, res) => {
   }
 });
 
-app.delete("/api/user/playlists/:id/songs/:videoId", async (req, res) => {
-  const playlistId = parseInt(req.params.id, 10);
-  const { videoId } = req.params;
-  if (isNaN(playlistId) || !videoId) return res.status(400).json({ error: "Missing fields" });
+app.delete("/api/user/playlists/songs", async (req, res) => {
+  const playlistId = parseInt(req.query.playlistId as string, 10);
+  const songVideoId = req.query.songVideoId as string;
+  if (isNaN(playlistId) || !songVideoId) return res.status(400).json({ error: "Missing fields" });
   try {
+    const cleanSongId = songVideoId.replace(/^(yt_)+/, "");
     await pool.query(
       "DELETE FROM user_playlist_songs WHERE playlist_id = $1 AND song_video_id = $2",
-      [playlistId, videoId]
+      [playlistId, cleanSongId]
     );
     res.json({ success: true });
   } catch (err: any) {

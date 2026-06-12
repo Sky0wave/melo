@@ -386,7 +386,7 @@ export default function App() {
         const likesRes = await fetch(`/api/user/likes?userId=${googleUser.id}`);
         if (likesRes.ok) {
           const likes = await likesRes.json();
-          setFavorites(likes.map((s: any) => 'yt_' + s.video_id));
+          setFavorites(likes.map((s: any) => 'yt_' + (s.video_id ? s.video_id.replace(/^(yt_)+/, "") : "")));
         }
 
         // 2. Playlists
@@ -402,7 +402,7 @@ export default function App() {
           const historyData = await historyRes.json();
           const habitsMap: Record<string, any> = {};
           historyData.forEach((h: any) => {
-            const id = 'yt_' + h.song_id;
+            const id = 'yt_' + (h.song_id ? h.song_id.replace(/^(yt_)+/, "") : "");
             if (!habitsMap[id]) {
               habitsMap[id] = { songId: id, songTitle: h.song_title, artist: h.artist, count: 0 };
             }
@@ -412,7 +412,7 @@ export default function App() {
 
           if (historyData.length > 0) {
             const lastSong = historyData[0];
-            const lastSongId = 'yt_' + lastSong.song_id;
+            const lastSongId = 'yt_' + (lastSong.song_id ? lastSong.song_id.replace(/^(yt_)+/, "") : "");
             const matchedSong = {
               id: lastSongId,
               title: lastSong.song_title,
@@ -423,8 +423,8 @@ export default function App() {
               genre: "Recent",
               mood: "Recent",
               lyrics: "",
-              coverUrl: `https://img.youtube.com/vi/${lastSong.song_id}/hqdefault.jpg`,
-              videoId: lastSong.song_id,
+              coverUrl: `https://img.youtube.com/vi/${lastSong.song_id ? lastSong.song_id.replace(/^(yt_)+/, "") : ""}/hqdefault.jpg`,
+              videoId: lastSong.song_id ? lastSong.song_id.replace(/^(yt_)+/, "") : "",
               source: "youtube"
             };
             setCurrentSong(matchedSong);
@@ -485,6 +485,7 @@ export default function App() {
 
   // Jam Room State
   const [jamRoom, setJamRoom] = useState<{ room_id: string; isHost: boolean; creator_id: string; password?: string } | null>(null);
+  const [chatMessages, setChatMessages] = useState<any[]>([]);
   const jamRoomRef = useRef<typeof jamRoom>(null);
   const currentSongRef = useRef<Song | null>(null);
   const progressRef = useRef<number>(0);
@@ -492,6 +493,21 @@ export default function App() {
   useEffect(() => {
     jamRoomRef.current = jamRoom;
   }, [jamRoom]);
+
+  useEffect(() => {
+    if (jamRoom) {
+      fetch(`/api/jams/${jamRoom.room_id}/messages`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.success && Array.isArray(data.messages)) {
+            setChatMessages(data.messages);
+          }
+        })
+        .catch(err => console.error("Failed to load chat history:", err));
+    } else {
+      setChatMessages([]);
+    }
+  }, [jamRoom?.room_id]);
 
   useEffect(() => {
     currentSongRef.current = currentSong;
@@ -732,6 +748,15 @@ export default function App() {
               setIsPlaying(false);
             }
           }
+        } else if (envelope.type === "JAM_MESSAGE") {
+          const msg = envelope.data;
+          const currentRoom = jamRoomRef.current;
+          if (currentRoom && currentRoom.room_id === msg.room_id) {
+            setChatMessages(prev => {
+              if (prev.some(m => m.id === msg.id && msg.id !== undefined)) return prev;
+              return [...prev, msg];
+            });
+          }
         }
       } catch (err) {
         console.error("SSE parsing error:", err);
@@ -743,7 +768,7 @@ export default function App() {
     };
   }, []);
 
-  const handlePlaySongDirectly = (song: Song) => {
+  const handlePlaySongDirectly = (song: Song, contextQueue?: Song[]) => {
     // Break follow sync on active manual select
     if (followingTarget) {
       setFollowingTarget(null);
@@ -752,6 +777,15 @@ export default function App() {
     setCurrentSong(song);
     setIsPlaying(true);
     setProgress(0);
+
+    if (contextQueue && contextQueue.length > 0) {
+      setMusicQueue(contextQueue);
+      const idx = contextQueue.findIndex(s => s.id === song.id);
+      setQueueIndex(idx !== -1 ? idx : 0);
+    } else {
+      setMusicQueue([song]);
+      setQueueIndex(0);
+    }
 
     addNotification("success", `Now playing: ${song.title}`);
 
@@ -789,7 +823,7 @@ export default function App() {
 
     // Persist listen event to the database
     if (googleUser && googleUser.id) {
-      const cleanSongId = song.id.startsWith("yt_") ? song.id.substring(3) : song.id;
+      const cleanSongId = song.id.replace(/^(yt_)+/, "");
       fetch("/api/user/history", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -810,7 +844,7 @@ export default function App() {
             const historyData = await historyRes.json();
             const habitsMap: Record<string, any> = {};
             historyData.forEach((h: any) => {
-              const id = 'yt_' + h.song_id;
+              const id = 'yt_' + (h.song_id ? h.song_id.replace(/^(yt_)+/, "") : "");
               if (!habitsMap[id]) {
                 habitsMap[id] = { songId: id, songTitle: h.song_title, artist: h.artist, count: 0 };
               }
@@ -855,6 +889,31 @@ export default function App() {
     setProgress(0);
   };
 
+  const handlePlayerError = (errorCode: number) => {
+    console.error("YouTube Player Error:", errorCode);
+    setIsPlaying(false);
+
+    let message = "Failed to play this song.";
+    if (errorCode === 101 || errorCode === 150) {
+      message = "Playback restricted by owner (copyright). Skipping to next version...";
+    } else if (errorCode === 2) {
+      message = "Invalid song ID. Skipping...";
+    } else if (errorCode === 100) {
+      message = "Song not found or private. Skipping...";
+    } else {
+      message = "Playback error occurred. Skipping...";
+    }
+
+    addNotification("error", message);
+
+    if (musicQueue.length > 1) {
+      setTimeout(() => {
+        onNextSong();
+        setIsPlaying(true);
+      }, 1500);
+    }
+  };
+
   const handleTogglePlay = () => {
     // If following anyone, break flow on local pause/play toggle
     if (followingTarget) {
@@ -876,7 +935,7 @@ export default function App() {
 
   const handleToggleFavorite = async (songId: string) => {
     const isFav = favorites.includes(songId);
-    const cleanSongId = songId.startsWith("yt_") ? songId.substring(3) : songId;
+    const cleanSongId = songId.replace(/^(yt_)+/, "");
     
     // Find song info
     const song = songs.find(s => s.id === songId) || currentSong;
@@ -943,8 +1002,6 @@ export default function App() {
   };
 
   const handleCreatePlaylist = async (name: string, description: string, initialSongs: Song[] = []) => {
-    addNotification("success", `Created playlist "${name}"`);
-
     if (!googleUser || !googleUser.id) {
       // Fallback local-only creation for guests
       const newPL: Playlist = {
@@ -956,6 +1013,7 @@ export default function App() {
         coverUrl: "https://lh3.googleusercontent.com/aida-public/AB6AXuDesJQhVHAwD48gusRnhSWxi2Wr4Se4dXJ2dNzny1LFufaJZskiTKIqdRsCcw180iEcexkCxubLMpt4CcIn01QzrzbAYlyyb15lMkDwy5-w82vvPYCnV_jl4NM-ctTd-lFkGawRTWky4mNLUpivTYBXLAfZSQV9gpm3aj3biLnKxwR794EB0klNZ51Mhb8POyFyI7nJOnQzK_HMq2v-WEw3bkzEMEM_FExWR1qVHUfoli1rlhkB9Z783f5QAQq7Yuwt9FXFr6tHk1Q"
       };
       setPlaylists(prev => [...prev, newPL]);
+      addNotification("success", `Created playlist "${name}"`);
       return;
     }
 
@@ -977,7 +1035,7 @@ export default function App() {
         // If there are initial songs, add them
         if (initialSongs.length > 0) {
           for (const song of initialSongs) {
-            const cleanSongId = song.id.startsWith("yt_") ? song.id.substring(3) : song.id;
+            const cleanSongId = song.id.replace(/^(yt_)+/, "");
             await fetch("/api/user/playlists/songs", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -1000,9 +1058,14 @@ export default function App() {
           const plData = await plRes.json();
           setPlaylists(plData);
         }
+        addNotification("success", `Created playlist "${name}"`);
+      } else {
+        const errData = await res.json();
+        addNotification("error", `Failed to create playlist: ${errData.error || "Server error"}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.warn("Failed creating database playlist:", err);
+      addNotification("error", `Failed to create playlist: ${err.message || "Network error"}`);
     }
   };
 
@@ -1011,8 +1074,6 @@ export default function App() {
   };
 
   const handleAddSongToPlaylist = async (song: Song, playlistId: string) => {
-    addNotification("success", `Added "${song.title}" to playlist`);
-
     // Check if it's a guest local playlist
     if (playlistId.startsWith("pl_")) {
       setPlaylists(prev => prev.map(p => {
@@ -1022,13 +1083,14 @@ export default function App() {
         }
         return p;
       }));
+      addNotification("success", `Added "${song.title}" to playlist`);
       return;
     }
 
     if (!googleUser || !googleUser.id) return;
 
     try {
-      const cleanSongId = song.id.startsWith("yt_") ? song.id.substring(3) : song.id;
+      const cleanSongId = song.id.replace(/^(yt_)+/, "");
       const res = await fetch("/api/user/playlists/songs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1049,15 +1111,18 @@ export default function App() {
           const plData = await plRes.json();
           setPlaylists(plData);
         }
+        addNotification("success", `Added "${song.title}" to playlist`);
+      } else {
+        const errData = await res.json();
+        addNotification("error", `Failed to add song: ${errData.error || "Server error"}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.warn("Failed adding song to database playlist:", err);
+      addNotification("error", `Failed to add song: ${err.message || "Network error"}`);
     }
   };
 
   const handleRemoveFromPlaylist = async (songId: string, playlistId: string) => {
-    addNotification("info", "Removed song from playlist");
-
     if (playlistId.startsWith("pl_")) {
       setPlaylists(prev => prev.map(p => {
         if (p.id === playlistId) {
@@ -1065,13 +1130,14 @@ export default function App() {
         }
         return p;
       }));
+      addNotification("info", "Removed song from playlist");
       return;
     }
 
     if (!googleUser || !googleUser.id) return;
 
     try {
-      const cleanSongId = songId.startsWith("yt_") ? songId.substring(3) : songId;
+      const cleanSongId = songId.replace(/^(yt_)+/, "");
       const res = await fetch(`/api/user/playlists/songs?playlistId=${playlistId}&songVideoId=${cleanSongId}`, {
         method: "DELETE"
       });
@@ -1082,9 +1148,14 @@ export default function App() {
           const plData = await plRes.json();
           setPlaylists(plData);
         }
+        addNotification("info", "Removed song from playlist");
+      } else {
+        const errData = await res.json();
+        addNotification("error", `Failed to remove song: ${errData.error || "Server error"}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.warn("Failed removing song from database playlist:", err);
+      addNotification("error", `Failed to remove song: ${err.message || "Network error"}`);
     }
   };
 
@@ -1175,6 +1246,20 @@ export default function App() {
     if (jamRoom) {
       addNotification("info", `Left Jam Room ${jamRoom.room_id}`);
       setJamRoom(null);
+    }
+  };
+
+  const handleSendJamMessage = async (text: string) => {
+    if (!jamRoom || !text.trim()) return;
+    try {
+      const currentUsername = googleUser?.name || username || "Guest";
+      await fetch(`/api/jams/${jamRoom.room_id}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: currentUsername, message: text.trim() })
+      });
+    } catch (err) {
+      console.error("Failed to send jam message:", err);
     }
   };
 
@@ -1319,6 +1404,9 @@ export default function App() {
             onToggleRepeat={() => setRepeatOn(!repeatOn)}
             onOpenEqualizer={() => setIsEqualizerOpen(true)}
             onOpenQueue={() => setIsQueueOpen(true)}
+            jamRoom={jamRoom}
+            chatMessages={chatMessages}
+            onSendJamMessage={handleSendJamMessage}
           />
         );
       case "profile":
@@ -1356,12 +1444,13 @@ export default function App() {
       {/* YouTube Player Node */}
       {currentSong && (currentSong.id.startsWith("yt_") || currentSong.videoId) && (
         <YouTubePlayer
-          videoId={currentSong.videoId || currentSong.id.replace(/^(yt_)+/, "")}
+          videoId={(currentSong.videoId || currentSong.id).replace(/^(yt_)+/, "")}
           isPlaying={isPlaying}
           onTimeUpdate={(currentTime) => setProgress(Math.floor(currentTime))}
           onEnded={onNextSong}
           onReady={() => console.log("YouTube Player Ready")}
           seekTo={ytSeekTo}
+          onError={handlePlayerError}
         />
       )}
 
@@ -1397,6 +1486,13 @@ export default function App() {
           <button className="font-sans text-[9px] font-bold text-[#FF007A] border border-[#FF007A]/22 rounded-full px-3 py-1 bg-[#FF007A]/10 tracking-wider hover:bg-[#FF007A]/20 transition-all active:scale-95">
             PLATINUM
           </button>
+          <a
+            href="/Melo.apk"
+            download
+            className="flex items-center gap-1.5 font-sans text-[9px] font-bold text-white border border-white/20 rounded-full px-3 py-1 bg-white/5 tracking-wider hover:bg-white/10 transition-all active:scale-95 cursor-pointer"
+          >
+            <span>📲</span> INSTALL APK
+          </a>
           <button 
             onClick={() => setIsNotificationsOpen(true)}
             className="relative p-1.5 hover:bg-white/5 rounded-full transition-colors text-white/60 hover:text-white cursor-pointer"
