@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -8,9 +8,10 @@ import {
   TouchableOpacity, 
   Modal, 
   ScrollView,
-  Alert
+  Alert,
+  Image
 } from 'react-native';
-import { dbService, Song } from '@/services/db';
+import { dbService, Song, getSongCoverUrl } from '@/services/db';
 import { usePlayer } from '@/context/player-context';
 import { useAuth } from '@/context/auth-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -29,7 +30,6 @@ export default function SearchScreen() {
   const { playSong, currentSong, isPlaying } = usePlayer();
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [allSongs, setAllSongs] = useState<Song[]>([]);
   const [filteredSongs, setFilteredSongs] = useState<Song[]>([]);
   const [favorites, setFavorites] = useState<string[]>([]);
   
@@ -40,10 +40,8 @@ export default function SearchScreen() {
   const [songUrl, setSongUrl] = useState('');
 
   // Fetch all songs
-  const fetchSongs = async () => {
+  const fetchSongs = useCallback(async () => {
     try {
-      const songs = await dbService.getSongs();
-      setAllSongs(songs);
       if (user) {
         const favs = await dbService.getFavorites(user.id);
         setFavorites(favs.map(f => f.id));
@@ -51,26 +49,30 @@ export default function SearchScreen() {
     } catch (err) {
       console.error('Error fetching songs in search:', err);
     }
-  };
+  }, [user]);
 
   useEffect(() => {
     fetchSongs();
-  }, [user, currentSong]);
+  }, [fetchSongs, currentSong]);
 
-  // Filter songs based on query
+  // Search songs using backend Smart Search
   useEffect(() => {
     if (!searchQuery.trim()) {
       setFilteredSongs([]);
-    } else {
-      const query = searchQuery.toLowerCase().trim();
-      const filtered = allSongs.filter(
-        (song) => 
-          song.title.toLowerCase().includes(query) || 
-          song.artist.toLowerCase().includes(query)
-      );
-      setFilteredSongs(filtered);
+      return;
     }
-  }, [searchQuery, allSongs]);
+
+    const delayDebounce = setTimeout(async () => {
+      try {
+        const results = await dbService.searchSongs(searchQuery);
+        setFilteredSongs(results);
+      } catch (err) {
+        console.error('Error performing Smart Search:', err);
+      }
+    }, 400);
+
+    return () => clearTimeout(delayDebounce);
+  }, [searchQuery]);
 
   // Create Song Action
   const handleAddSong = async () => {
@@ -165,12 +167,17 @@ export default function SearchScreen() {
                   style={styles.songMain}
                   onPress={() => playSong(item, filteredSongs)}
                 >
-                  <Ionicons 
-                    name={isCurrent && isPlaying ? "volume-medium" : "musical-notes-outline"} 
-                    size={22} 
-                    color={isCurrent ? "#FF007A" : "#ECEDEE"} 
-                    style={{ marginRight: 12 }}
-                  />
+                  <View style={styles.songRowImageContainer}>
+                    <Image 
+                      source={{ uri: getSongCoverUrl(item) }} 
+                      style={styles.songRowImage} 
+                    />
+                    {isCurrent && isPlaying && (
+                      <View style={styles.playingImageOverlay}>
+                        <Ionicons name="volume-medium" size={16} color="#FF007A" />
+                      </View>
+                    )}
+                  </View>
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.songTitle, isCurrent && styles.songTitleActive]} numberOfLines={1}>
                       {item.title}
@@ -375,6 +382,25 @@ const styles = StyleSheet.create({
   songRowActive: {
     borderColor: '#FF007A',
     backgroundColor: 'rgba(255, 0, 122, 0.02)',
+  },
+  songRowImageContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    marginRight: 12,
+    overflow: 'hidden',
+    position: 'relative',
+    backgroundColor: '#27272A',
+  },
+  songRowImage: {
+    width: '100%',
+    height: '100%',
+  },
+  playingImageOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   songMain: {
     flexDirection: 'row',

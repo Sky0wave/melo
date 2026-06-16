@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   View, 
   Text, 
@@ -6,20 +6,17 @@ import {
   TouchableOpacity, 
   ActivityIndicator, 
   ScrollView,
-  Dimensions,
-  ImageBackground,
   Modal,
   TextInput,
   Alert,
   Share,
-  Clipboard
+  Image,
+  Animated
 } from 'react-native';
 import { useAuth } from '@/context/auth-context';
 import { usePlayer } from '@/context/player-context';
-import { dbService, Song } from '@/services/db';
+import { dbService, Song, getSongCoverUrl } from '@/services/db';
 import { Ionicons } from '@expo/vector-icons';
-
-const { width } = Dimensions.get('window');
 
 const MOODS = ['All', 'Energetic', 'Focus', 'Melancholic'];
 
@@ -35,6 +32,44 @@ const SONG_MOODS: Record<string, string> = {
   'f5b5f25a-4933-4f0e-be4c-0c1598f828a8': 'Melancholic',   // Perfect Places
 };
 
+function Skeleton({ width, height, borderRadius = 4, style }: { width: number | string, height: number | string, borderRadius?: number, style?: any }) {
+  const pulseAnim = useRef(new Animated.Value(0.12)).current;
+
+  useEffect(() => {
+    const sharedAnimation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 0.28,
+          duration: 900,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 0.12,
+          duration: 900,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    sharedAnimation.start();
+    return () => sharedAnimation.stop();
+  }, [pulseAnim]);
+
+  return (
+    <Animated.View
+      style={[
+        {
+          width,
+          height,
+          borderRadius,
+          backgroundColor: '#ECEDEE',
+          opacity: pulseAnim,
+        },
+        style,
+      ]}
+    />
+  );
+}
+
 export default function HomeScreen() {
   const { user } = useAuth();
   const { 
@@ -44,7 +79,9 @@ export default function HomeScreen() {
     jamRoom,
     createJamRoom,
     joinJamRoom,
-    leaveJamRoom
+    leaveJamRoom,
+    chatMessages,
+    sendChatMessage
   } = usePlayer();
 
   const [recentlyPlayed, setRecentlyPlayed] = useState<Song[]>([]);
@@ -60,6 +97,7 @@ export default function HomeScreen() {
   const [joinPassword, setJoinPassword] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
+  const [chatMessageText, setChatMessageText] = useState('');
   
   // Replicating web mood filters
   const [selectedMood, setSelectedMood] = useState('All');
@@ -149,11 +187,11 @@ export default function HomeScreen() {
     } finally {
       setLoading(false);
     }
-  }, [user, currentSong]);
+  }, [user]);
 
   useEffect(() => {
     loadHomeData();
-  }, [loadHomeData]);
+  }, [loadHomeData, currentSong]);
 
   // Toggle favorite
   const handleToggleFav = async (songId: string) => {
@@ -186,8 +224,72 @@ export default function HomeScreen() {
 
   if (loading && songs.length === 0) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#FF007A" />
+      <View style={{ flex: 1, backgroundColor: '#09090B' }}>
+        <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+          {/* Header */}
+          <View style={styles.header}>
+            <View>
+              <Skeleton width={100} height={12} borderRadius={3} style={{ marginBottom: 8 }} />
+              <Skeleton width={180} height={24} borderRadius={4} />
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <Skeleton width={40} height={40} borderRadius={20} />
+              <Skeleton width={40} height={40} borderRadius={20} />
+            </View>
+          </View>
+
+          {/* Curation Card Placeholder */}
+          <View style={[styles.curationCard, { opacity: 0.6 }]}>
+            <View style={styles.badgeContainer}>
+              <SparkleIcon />
+              <Text style={styles.badgeText}>CURATION ALPHA</Text>
+            </View>
+            <Skeleton width={200} height={22} borderRadius={4} style={{ marginBottom: 8 }} />
+            <Skeleton width={250} height={14} borderRadius={3} style={{ marginBottom: 16 }} />
+            <Skeleton width={90} height={36} borderRadius={18} />
+          </View>
+
+          {/* Mood Selector Pills */}
+          <View style={{ marginBottom: 24, paddingHorizontal: 20, flexDirection: 'row', gap: 8 }}>
+            <Skeleton width={50} height={34} borderRadius={17} />
+            <Skeleton width={80} height={34} borderRadius={17} />
+            <Skeleton width={60} height={34} borderRadius={17} />
+            <Skeleton width={90} height={34} borderRadius={17} />
+          </View>
+
+          {/* Recently Played Section Placeholder */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Recently Played</Text>
+            <View style={{ flexDirection: 'row', gap: 16, paddingHorizontal: 20 }}>
+              {[1, 2, 3, 4].map((i) => (
+                <View key={i} style={{ width: 100 }}>
+                  <Skeleton width={100} height={100} borderRadius={12} style={{ marginBottom: 8 }} />
+                  <Skeleton width={80} height={12} borderRadius={3} style={{ marginBottom: 6 }} />
+                  <Skeleton width={50} height={10} borderRadius={2} />
+                </View>
+              ))}
+            </View>
+          </View>
+
+          {/* Songs Section Placeholder */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Made For You</Text>
+            <View style={{ paddingHorizontal: 20, gap: 16 }}>
+              {[1, 2, 3, 5].map((i) => (
+                <View key={i} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Skeleton width={44} height={44} borderRadius={8} style={{ marginRight: 12 }} />
+                    <View>
+                      <Skeleton width={120} height={14} borderRadius={3} style={{ marginBottom: 6 }} />
+                      <Skeleton width={80} height={10} borderRadius={2} />
+                    </View>
+                  </View>
+                  <Skeleton width={20} height={20} borderRadius={10} />
+                </View>
+              ))}
+            </View>
+          </View>
+        </ScrollView>
       </View>
     );
   }
@@ -280,12 +382,16 @@ export default function HomeScreen() {
                   style={styles.recentCard}
                   onPress={() => playSong(song, recentlyPlayed)}
                 >
-                  <View style={[styles.recentIconContainer, isCurrent && styles.activeRecentIcon]}>
-                    <Ionicons 
-                      name={isCurrent && isPlaying ? "volume-medium" : "musical-notes"} 
-                      size={28} 
-                      color={isCurrent ? "#FF007A" : "#ECEDEE"} 
+                  <View style={[styles.recentImageContainer, isCurrent && styles.activeRecentImage]}>
+                    <Image 
+                      source={{ uri: getSongCoverUrl(song) }} 
+                      style={styles.recentImage}
                     />
+                    {isCurrent && isPlaying && (
+                      <View style={styles.recentPlayingOverlay}>
+                        <Ionicons name="volume-medium" size={24} color="#FF007A" />
+                      </View>
+                    )}
                   </View>
                   <Text style={styles.recentTitle} numberOfLines={1}>{song.title}</Text>
                   <Text style={styles.recentArtist} numberOfLines={1}>{song.artist}</Text>
@@ -315,12 +421,17 @@ export default function HomeScreen() {
                   style={styles.songMain}
                   onPress={() => playSong(song, filteredSongs)}
                 >
-                  <Ionicons 
-                    name={isCurrent && isPlaying ? "volume-medium" : "play-circle-outline"} 
-                    size={24} 
-                    color={isCurrent ? "#FF007A" : "#ECEDEE"} 
-                    style={{ marginRight: 12 }}
-                  />
+                  <View style={styles.songRowImageContainer}>
+                    <Image 
+                      source={{ uri: getSongCoverUrl(song) }} 
+                      style={styles.songRowImage} 
+                    />
+                    {isCurrent && isPlaying && (
+                      <View style={styles.playingImageOverlay}>
+                        <Ionicons name="volume-medium" size={16} color="#FF007A" />
+                      </View>
+                    )}
+                  </View>
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.songTitle, isCurrent && styles.songTitleActive]} numberOfLines={1}>
                       {song.title}
@@ -376,29 +487,67 @@ export default function HomeScreen() {
                 </Text>
               </View>
 
-              <Text style={styles.jamRoomIdLabel}>ROOM ID</Text>
-              <Text style={styles.jamRoomIdValue}>{jamRoom.room_id}</Text>
-
-              <View style={styles.jamInfoCard}>
-                <Ionicons name="information-circle-outline" size={18} color="#FF007A" style={{ marginRight: 8, marginTop: 2 }} />
-                <Text style={styles.jamInfoText}>
-                  {jamRoom.isHost 
-                    ? 'Anyone with this Room ID and your password can join. The music you play, pause, or seek will sync to them in real time.'
-                    : 'Your music is synchronized with the host. If the host plays, pauses, or changes the song, your player will follow.'}
-                </Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 8 }}>
+                <View>
+                  <Text style={styles.jamRoomIdLabel}>ROOM ID</Text>
+                  <Text style={styles.jamRoomIdValue}>{jamRoom.room_id}</Text>
+                </View>
+                
+                <TouchableOpacity 
+                  style={[styles.shareBtn, { marginTop: 0, paddingVertical: 8, paddingHorizontal: 12 }]} 
+                  onPress={() => {
+                    Share.share({
+                      message: `Join my Melo Music Jam Room!\nRoom ID: ${jamRoom.room_id}\nPassword: ${jamPassword || '(Secured)'}`
+                    }).catch(err => console.log(err));
+                  }}
+                >
+                  <Ionicons name="share-social-outline" size={16} color="#09090B" style={{ marginRight: 4 }} />
+                  <Text style={[styles.shareBtnText, { fontSize: 11 }]}>Share Room</Text>
+                </TouchableOpacity>
               </View>
 
-              <TouchableOpacity 
-                style={styles.shareBtn} 
-                onPress={() => {
-                  Share.share({
-                    message: `Join my Melo Music Jam Room!\nRoom ID: ${jamRoom.room_id}\nPassword: ${jamPassword || '(Secured)'}`
-                  }).catch(err => console.log(err));
-                }}
-              >
-                <Ionicons name="share-social-outline" size={18} color="#09090B" style={{ marginRight: 6 }} />
-                <Text style={styles.shareBtnText}>Share Room Info</Text>
-              </TouchableOpacity>
+              {/* Chat Box */}
+              <View style={styles.chatSection}>
+                <Text style={styles.chatSectionTitle}>SESSION CHAT</Text>
+                <ScrollView 
+                  style={styles.chatScrollView}
+                  contentContainerStyle={styles.chatContentContainer}
+                  ref={(ref) => {
+                    ref?.scrollToEnd({ animated: true });
+                  }}
+                >
+                  {chatMessages.length === 0 ? (
+                    <Text style={styles.emptyChatText}>No messages yet. Send a message to start the conversation!</Text>
+                  ) : (
+                    chatMessages.map((msg, index) => (
+                      <View key={msg.id || index} style={styles.chatMessageItem}>
+                        <Text style={styles.chatMessageUser}>{msg.username}</Text>
+                        <Text style={styles.chatMessageText}>{msg.message}</Text>
+                      </View>
+                    ))
+                  )}
+                </ScrollView>
+                <View style={styles.chatInputContainer}>
+                  <TextInput
+                    style={styles.chatInput}
+                    placeholder="Type a message..."
+                    placeholderTextColor="#6B7280"
+                    value={chatMessageText}
+                    onChangeText={setChatMessageText}
+                  />
+                  <TouchableOpacity 
+                    style={styles.chatSendBtn}
+                    onPress={() => {
+                      if (chatMessageText.trim()) {
+                        sendChatMessage(chatMessageText);
+                        setChatMessageText('');
+                      }
+                    }}
+                  >
+                    <Ionicons name="send" size={12} color="#09090B" />
+                  </TouchableOpacity>
+                </View>
+              </View>
 
               <TouchableOpacity 
                 style={styles.leaveBtn} 
@@ -697,20 +846,48 @@ const styles = StyleSheet.create({
   recentCard: {
     width: 100,
   },
-  recentIconContainer: {
+  recentImageContainer: {
     width: 100,
     height: 100,
     borderRadius: 12,
     backgroundColor: '#18181B',
     borderWidth: 1,
     borderColor: '#27272A',
-    justifyContent: 'center',
-    alignItems: 'center',
+    overflow: 'hidden',
+    position: 'relative',
     marginBottom: 8,
   },
-  activeRecentIcon: {
+  activeRecentImage: {
     borderColor: '#FF007A',
-    backgroundColor: 'rgba(255, 0, 122, 0.03)',
+  },
+  recentImage: {
+    width: '100%',
+    height: '100%',
+  },
+  recentPlayingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  songRowImageContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    marginRight: 12,
+    overflow: 'hidden',
+    position: 'relative',
+    backgroundColor: '#27272A',
+  },
+  songRowImage: {
+    width: '100%',
+    height: '100%',
+  },
+  playingImageOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   recentTitle: {
     color: '#ECEDEE',
@@ -975,5 +1152,75 @@ const styles = StyleSheet.create({
     color: '#09090B',
     fontSize: 14,
     fontWeight: '800',
+  },
+  chatSection: {
+    width: '100%',
+    backgroundColor: '#151518',
+    borderWidth: 1,
+    borderColor: '#252528',
+    borderRadius: 16,
+    padding: 16,
+    marginVertical: 12,
+    height: 220,
+  },
+  chatSectionTitle: {
+    color: '#FF007A',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
+    marginBottom: 8,
+  },
+  chatScrollView: {
+    flex: 1,
+    marginBottom: 8,
+  },
+  chatContentContainer: {
+    gap: 8,
+  },
+  emptyChatText: {
+    color: '#6B7280',
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: 20,
+    fontStyle: 'italic',
+  },
+  chatMessageItem: {
+    backgroundColor: '#1E1E22',
+    borderRadius: 10,
+    padding: 8,
+  },
+  chatMessageUser: {
+    color: '#FF007A',
+    fontSize: 11,
+    fontWeight: '800',
+    marginBottom: 2,
+  },
+  chatMessageText: {
+    color: '#ECEDEE',
+    fontSize: 13,
+  },
+  chatInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  chatInput: {
+    flex: 1,
+    backgroundColor: '#1E1E22',
+    borderWidth: 1,
+    borderColor: '#2D2D34',
+    borderRadius: 10,
+    color: '#ECEDEE',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 13,
+  },
+  chatSendBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#FF007A',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });

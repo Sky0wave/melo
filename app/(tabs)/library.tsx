@@ -7,11 +7,12 @@ import {
   FlatList, 
   Modal, 
   TextInput, 
-  Alert
+  Alert,
+  Image
 } from 'react-native';
 import { useAuth } from '@/context/auth-context';
 import { usePlayer } from '@/context/player-context';
-import { dbService, Playlist, Song } from '@/services/db';
+import { dbService, Playlist, Song, getSongCoverUrl } from '@/services/db';
 import { Ionicons } from '@expo/vector-icons';
 
 type TabType = 'playlists' | 'favorites';
@@ -46,11 +47,11 @@ export default function LibraryScreen() {
     } catch (err) {
       console.error('Error loading library data:', err);
     }
-  }, [user, activeTab, currentSong]);
+  }, [user, activeTab]);
 
   useEffect(() => {
     loadLibraryData();
-  }, [loadLibraryData]);
+  }, [loadLibraryData, currentSong]);
 
   // Load selected playlist songs
   const fetchPlaylistSongs = async (playlistId: string) => {
@@ -183,8 +184,10 @@ export default function LibraryScreen() {
               style={styles.playlistRow}
               onPress={() => handleOpenPlaylistDetail(item)}
             >
-              <View style={styles.playlistIconBg}>
-                <Ionicons name="musical-notes" size={24} color="#FF007A" />
+              <View style={styles.playlistCoverContainer}>
+                <View style={styles.playlistCoverGradient}>
+                  <Ionicons name="folder-outline" size={22} color="#09090B" />
+                </View>
               </View>
               <View style={{ flex: 1, marginLeft: 16 }}>
                 <Text style={styles.playlistRowName}>{item.name}</Text>
@@ -216,12 +219,17 @@ export default function LibraryScreen() {
                   style={styles.songMain}
                   onPress={() => playSong(item, favorites)}
                 >
-                  <Ionicons 
-                    name={isCurrent && isPlaying ? "volume-medium" : "musical-notes-outline"} 
-                    size={22} 
-                    color={isCurrent ? "#FF007A" : "#ECEDEE"} 
-                    style={{ marginRight: 12 }}
-                  />
+                  <View style={styles.songRowImageContainer}>
+                    <Image 
+                      source={{ uri: getSongCoverUrl(item) }} 
+                      style={styles.songRowImage} 
+                    />
+                    {isCurrent && isPlaying && (
+                      <View style={styles.playingImageOverlay}>
+                        <Ionicons name="volume-medium" size={16} color="#FF007A" />
+                      </View>
+                    )}
+                  </View>
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.songTitle, isCurrent && styles.songTitleActive]} numberOfLines={1}>
                       {item.title}
@@ -323,12 +331,17 @@ export default function LibraryScreen() {
                       style={styles.songMain}
                       onPress={() => playSong(item, playlistSongs)}
                     >
-                      <Ionicons 
-                        name={isCurrent && isPlaying ? "volume-medium" : "musical-notes-outline"} 
-                        size={20} 
-                        color={isCurrent ? "#FF007A" : "#ECEDEE"} 
-                        style={{ marginRight: 12 }}
-                      />
+                      <View style={styles.songRowImageContainer}>
+                        <Image 
+                          source={{ uri: getSongCoverUrl(item) }} 
+                          style={styles.songRowImage} 
+                        />
+                        {isCurrent && isPlaying && (
+                          <View style={styles.playingImageOverlay}>
+                            <Ionicons name="volume-medium" size={16} color="#FF007A" />
+                          </View>
+                        )}
+                      </View>
                       <View style={{ flex: 1 }}>
                         <Text style={[styles.songTitle, isCurrent && styles.songTitleActive]} numberOfLines={1}>
                           {item.title}
@@ -421,13 +434,36 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 12,
   },
-  playlistIconBg: {
+  playlistCoverContainer: {
     width: 48,
     height: 48,
     borderRadius: 10,
-    backgroundColor: 'rgba(255, 0, 122, 0.05)',
+    overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255, 0, 122, 0.15)',
+    borderColor: 'rgba(255, 0, 122, 0.25)',
+  },
+  playlistCoverGradient: {
+    flex: 1,
+    backgroundColor: '#FF007A',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  songRowImageContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    marginRight: 12,
+    overflow: 'hidden',
+    position: 'relative',
+    backgroundColor: '#27272A',
+  },
+  songRowImage: {
+    width: '100%',
+    height: '100%',
+  },
+  playingImageOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
     justifyContent: 'center',
     alignItems: 'center',
   },

@@ -345,11 +345,12 @@ on public.jams for insert
 to authenticated
 with check (auth.uid() = creator_id);
 
--- Only the creator can update the jam state
-create policy "Only creator can update jam"
+-- Authenticated users can update the jam state (to support collaborative playback control)
+create policy "Authenticated users can update jam"
 on public.jams for update
 to authenticated
-using (auth.uid() = creator_id);
+using (true)
+with check (true);
 
 -- Only the creator can delete the jam
 create policy "Only creator can delete jam"

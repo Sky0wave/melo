@@ -73,34 +73,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(dbUser);
         return { error: null };
       } else {
-        // Mock authentication
-        const normalizedEmail = email.toLowerCase().trim();
-        const mockUsersStr = await AsyncStorage.getItem('mock_registered_users');
-        const mockUsers: Array<DbUser & { password_hash: string }> = mockUsersStr 
-          ? JSON.parse(mockUsersStr) 
-          : [];
-        
-        const matchedUser = mockUsers.find(u => u.email === normalizedEmail);
-        
-        if (!matchedUser) {
-          return { error: 'Invalid email or password.' };
+        // Authenticate via Neon Postgres Express API
+        try {
+          const name = email.split('@')[0];
+          const dbUser = await dbService.loginGuest(name, email);
+          setUser(dbUser);
+          return { error: null };
+        } catch (err: any) {
+          return { error: err.message || 'Failed to authenticate via server' };
         }
-        
-        if (matchedUser.password_hash !== password) { // Simple password matching for mock
-          return { error: 'Invalid email or password.' };
-        }
-
-        const loggedInUser: DbUser = {
-          id: matchedUser.id,
-          name: matchedUser.name,
-          email: matchedUser.email,
-          role: matchedUser.role || 'user',
-          created_at: matchedUser.created_at
-        };
-
-        await AsyncStorage.setItem('mock_current_user', JSON.stringify(loggedInUser));
-        setUser(loggedInUser);
-        return { error: null };
       }
     } catch (err: any) {
       return { error: err.message || 'An unknown error occurred during sign-in' };
@@ -129,41 +110,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // but it might take a split second, so handle user retrieval gracefully.
         return { error: null };
       } else {
-        // Mock register
-        const normalizedEmail = email.toLowerCase().trim();
-        const mockUsersStr = await AsyncStorage.getItem('mock_registered_users');
-        const mockUsers: Array<DbUser & { password_hash: string }> = mockUsersStr 
-          ? JSON.parse(mockUsersStr) 
-          : [];
-
-        if (mockUsers.some(u => u.email === normalizedEmail)) {
-          return { error: 'Email already in use.' };
+        // Register and login via Neon Postgres Express API
+        try {
+          const dbUser = await dbService.loginGuest(name, email);
+          setUser(dbUser);
+          return { error: null };
+        } catch (err: any) {
+          return { error: err.message || 'Failed to register via server' };
         }
-
-        const newUserId = Math.random().toString(36).substr(2, 9);
-        const newMockUser = {
-          id: newUserId,
-          name,
-          email: normalizedEmail,
-          password_hash: password,
-          role: 'user' as const,
-          created_at: new Date().toISOString()
-        };
-
-        mockUsers.push(newMockUser);
-        await AsyncStorage.setItem('mock_registered_users', JSON.stringify(mockUsers));
-
-        const loggedInUser: DbUser = {
-          id: newMockUser.id,
-          name: newMockUser.name,
-          email: newMockUser.email,
-          role: newMockUser.role,
-          created_at: newMockUser.created_at
-        };
-
-        await AsyncStorage.setItem('mock_current_user', JSON.stringify(loggedInUser));
-        setUser(loggedInUser);
-        return { error: null };
       }
     } catch (err: any) {
       return { error: err.message || 'An unknown error occurred during sign-up' };

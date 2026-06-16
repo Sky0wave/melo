@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { supabase, isSupabaseConfigured } from './supabase-client';
+import Constants from 'expo-constants';
 
 // ==========================================
 // TYPESCRIPT TYPES & INTERFACES
@@ -20,6 +20,8 @@ export interface Song {
   artist: string;
   youtube_url: string;
   created_at?: string;
+  coverUrl?: string;
+  durationSeconds?: number;
 }
 
 export interface Playlist {
@@ -28,6 +30,7 @@ export interface Playlist {
   name: string;
   cover_image?: string | null;
   created_at: string;
+  songs?: Song[];
 }
 
 export interface PlaylistSong {
@@ -93,17 +96,80 @@ export interface Jam {
   updated_at: string;
 }
 
+export interface JamMessage {
+  id: string;
+  room_id: string;
+  username: string;
+  message: string;
+  created_at: string;
+}
 
-// Default Seed Songs (matching UUIDs in database schema)
+// ==========================================
+// DYNAMIC BACKEND RESOLUTION
+// ==========================================
+
+let devHost = 'localhost';
+let isTunnel = false;
+try {
+  const hostUri = Constants.expoConfig?.hostUri;
+  if (hostUri) {
+    devHost = hostUri.split(':')[0];
+    if (devHost.includes('exp.direct') || devHost.includes('ngrok')) {
+      isTunnel = true;
+    }
+  }
+} catch (e) {
+  console.warn('[dbService] Failed to read hostUri:', e);
+}
+
+export const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || `http://${devHost}:3000`;
+console.log(`[dbService] Backend API configured at: ${BACKEND_URL}`);
+
+if (isTunnel && !process.env.EXPO_PUBLIC_BACKEND_URL) {
+  console.warn(
+    '\n[dbService] ⚠️ WARNING: You are running Expo with a tunnel, but no EXPO_PUBLIC_BACKEND_URL is set.\n' +
+    `Connecting to http://${devHost}:3000 will fail because the tunnel only forwards Metro.\n` +
+    'To connect the app to the backend:\n' +
+    '1. Connect your phone and computer to the same local Wi-Fi and run "npx expo start" (without --tunnel).\n' +
+    '2. OR, tunnel the backend port 3000 (e.g. using ngrok) and run: EXPO_PUBLIC_BACKEND_URL=https://your-backend-tunnel.ngrok.io npx expo start --tunnel\n'
+  );
+}
+
+// ==========================================
+// HELPERS
+// ==========================================
+
+export function getYoutubeVideoId(url: string, id: string): string {
+  if (id && id.startsWith('yt_')) {
+    return id.replace(/^(yt_)+/, '');
+  }
+  if (!url) return id || '';
+  try {
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+    const match = url.match(regExp);
+    if (match && match[2].length === 11) {
+      return match[2];
+    }
+  } catch (e) {}
+  return id || '';
+}
+
+export function getSongCoverUrl(song?: { id: string; youtube_url?: string; coverUrl?: string } | null): string {
+  if (!song) return 'https://images.unsplash.com/photo-1614149162883-504ce4d13909?w=300';
+  if (song.coverUrl) return song.coverUrl;
+  const videoId = getYoutubeVideoId(song.youtube_url || '', song.id);
+  if (videoId && videoId.length === 11) {
+    return `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+  }
+  return 'https://images.unsplash.com/photo-1614149162883-504ce4d13909?w=300';
+}
+
+// Default Seed Songs matching web defaults as fallback
 export const SEED_SONGS: Song[] = [
-  { id: 'f5b5f25a-4933-4f0e-be4c-0c1598f828a1', title: 'After Hours', artist: 'The Weeknd', youtube_url: 'https://www.youtube.com/watch?v=ygTZZpVNJ-Y' },
-  { id: 'f5b5f25a-4933-4f0e-be4c-0c1598f828a2', title: 'Blinding Lights', artist: 'The Weeknd', youtube_url: 'https://www.youtube.com/watch?v=4NRXx6U8ABQ' },
-  { id: 'f5b5f25a-4933-4f0e-be4c-0c1598f828a3', title: 'Starboy', artist: 'The Weeknd ft. Daft Punk', youtube_url: 'https://www.youtube.com/watch?v=34Na4j8AVgA' },
-  { id: 'f5b5f25a-4933-4f0e-be4c-0c1598f828a4', title: 'Midnight City', artist: 'M83', youtube_url: 'https://www.youtube.com/watch?v=dX3kSGcoR4k' },
-  { id: 'f5b5f25a-4933-4f0e-be4c-0c1598f828a5', title: 'Intro', artist: 'The xx', youtube_url: 'https://www.youtube.com/watch?v=sV4_wYldx7o' },
-  { id: 'f5b5f25a-4933-4f0e-be4c-0c1598f828a6', title: 'Sweater Weather', artist: 'The Neighbourhood', youtube_url: 'https://www.youtube.com/watch?v=GCdwKhTtNNw' },
-  { id: 'f5b5f25a-4933-4f0e-be4c-0c1598f828a7', title: 'Royals', artist: 'Lorde', youtube_url: 'https://www.youtube.com/watch?v=nlcIKh6s868' },
-  { id: 'f5b5f25a-4933-4f0e-be4c-0c1598f828a8', title: 'Perfect Places', artist: 'Lorde', youtube_url: 'https://www.youtube.com/watch?v=H74tC4s8lJ0' }
+  { id: 'vivid_obsessions', title: 'Vivid Obsessions', artist: 'Elena Cross', youtube_url: 'https://www.youtube.com/watch?v=vivid_obsessions', coverUrl: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDGWAh1VFYsxQ0g-qkNGuQGf-Ng7SUaWAqeUKBUrzObFGk8LREsSS52TQWm16L6PJQGUHBbtO5-fyjwCJiAYeUQuiBtWFnvAPRR-Mw7GlV64-6H9ymHsuAOAXSGTAKrJph6khODQ2v-6nQZvwwXhwuNSo5TkbarQ6nSUF_VOigBsNqgPokeRGsZGOXc6IgrMPJI7yTO7m4jDmsxZl3IEZfI5Rwzg96R7-01Pzxf0ZISu_7XOu40w9muva4OIYlVenxofxFUPu5o5EM', durationSeconds: 222 },
+  { id: 'midnight_bloom', title: 'Midnight Bloom', artist: 'The Quintet', youtube_url: 'https://www.youtube.com/watch?v=midnight_bloom', coverUrl: 'https://lh3.googleusercontent.com/aida-public/AB6AXuA63bp1UMtapYi6fPhLuMwB2cKTS5VktL8SZVj0TaEGR6gU3BgrnSALCh0BTA9Ap51nhR3P4yDlVKfF5dUcNourcoZo0wWxAVe9R9E6L48viehYWYDe6nNRbyB32Hy3fcy4r0P_hSM5xbTqpg3taHf0cRwkO2Xy1ovWEza_505NPfjBfN8uPqaO-TrU7VlK4KObfJ2AVcDBQfsqJKJLk9_FA2KL1xkzoh3QwPYA9hEBFr862kdgfFVSqnGSbUMEE4RIGaCsSvCbfYg', durationSeconds: 250 },
+  { id: 'subsonic_waves', title: 'Subsonic Waves', artist: 'Aura Digital', youtube_url: 'https://www.youtube.com/watch?v=subsonic_waves', coverUrl: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCVvNydBj_g56HeqfdTofcEDY5vWPDz_oI8PLg68HQ-3adjQZ5t1KpuYaT536BpB-PIq6DNHPa6xMfMOzSi-0ow9wVLDCg7ZHWUA2GwPcn0_pSxzhTvmjZjrrYezC3_1T_cyFmJK-51y09J7bwXV45vjFStBEfF2fClNZkS9ulcYE8H-Dv8S01H6Ttf5nZe0B0U2z9z8sZKzCFePi3dAvtaecs7mj8qlvgxc4MzfadB5KnVU6rjREoZG8auMsF1sPtulew62WSWuz4', durationSeconds: 312 },
+  { id: 'nocturnal_radiance', title: 'Nocturnal Radiance', artist: 'AETHERIS', youtube_url: 'https://www.youtube.com/watch?v=nocturnal_radiance', coverUrl: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBZB17HlkwoRIoV6mcyhJyW6ePcvosKZxu0gwF_ONaBuyyEQhRrk8a8sxdfgxsRv0vDFWkHr0V5tj4fAK0YQ_FIRFgc_hQqXkVcBxxLPlHz2VxQLkz1GdYMQKZemoSKqrAtekSmNqkdakREq-djoQfCLjbbNgO5R491f3rhWpc_WqjJsC4DzsmVczaNltKQJ6O06q3BHoolUwrpbEg2hqTv15oMgwIRmAFVA89h-r-B2hMV3BvAUNI1PWaLEB-l0o9lpm_sk-4F11g', durationSeconds: 312 }
 ];
 
 // ==========================================
@@ -122,7 +188,7 @@ async function saveUserLocal(userId: string, key: string, data: any): Promise<vo
 }
 
 // ==========================================
-// API DB SERVICE
+// API DB SERVICE CONNECTED TO POSTGRES BACKEND
 // ==========================================
 
 export const dbService = {
@@ -130,379 +196,347 @@ export const dbService = {
   // AUTHENTICATION & USER PROFILES
   // ==========================================
   async getCurrentUser(): Promise<DbUser | null> {
-    if (isSupabaseConfigured) {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return null;
-      
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-      
-      if (error || !data) {
-        return {
-          id: user.id,
-          email: user.email || '',
-          name: user.user_metadata?.name || 'Listener',
-          role: (user.user_metadata?.role as 'user' | 'admin') || 'user',
-          image_url: user.user_metadata?.image_url || null,
-          created_at: user.created_at
-        };
-      }
-      return data as DbUser;
-    } else {
-      const currentUser = await AsyncStorage.getItem('mock_current_user');
-      return currentUser ? JSON.parse(currentUser) : null;
-    }
+    const currentUser = await AsyncStorage.getItem('mock_current_user');
+    return currentUser ? JSON.parse(currentUser) : null;
+  },
+
+  async loginGuest(name?: string, email?: string): Promise<DbUser> {
+    const res = await fetch(`${BACKEND_URL}/api/auth/guest`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email })
+    });
+    if (!res.ok) throw new Error('Guest login failed');
+    const data = await res.json();
+    if (!data.success || !data.user) throw new Error('Invalid user payload');
+    
+    const dbUser: DbUser = {
+      id: data.user.id.toString(),
+      name: data.user.name,
+      email: data.user.email,
+      role: data.user.role || 'user',
+      image_url: data.user.picture,
+      created_at: data.user.created_at || new Date().toISOString()
+    };
+    
+    await AsyncStorage.setItem('mock_current_user', JSON.stringify(dbUser));
+    return dbUser;
   },
 
   // ==========================================
   // SHARED SONGS CATALOG
   // ==========================================
   async getSongs(): Promise<Song[]> {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase
-        .from('songs')
-        .select('*')
-        .order('title', { ascending: true });
-      if (error) throw error;
-      return data || [];
-    } else {
-      const songsStr = await AsyncStorage.getItem('mock_shared_songs');
-      const songs = songsStr ? JSON.parse(songsStr) : SEED_SONGS;
-      if (!songsStr) {
-        await AsyncStorage.setItem('mock_shared_songs', JSON.stringify(SEED_SONGS));
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/tracks`);
+      if (!res.ok) throw new Error();
+      const songs = await res.json();
+      return songs.map((s: any) => ({
+        id: s.id,
+        title: s.title,
+        artist: s.artist,
+        youtube_url: s.youtube_url || (s.videoId ? `https://www.youtube.com/watch?v=${s.videoId}` : ''),
+        coverUrl: s.coverUrl || s.cover_url,
+        durationSeconds: s.durationSeconds || s.duration_seconds || 180
+      }));
+    } catch {
+      // Fallback in case of server offline
+      return SEED_SONGS;
+    }
+  },
+
+  async getSongById(songId: string): Promise<Song | null> {
+    try {
+      const allSongs = await this.getSongs();
+      const song = allSongs.find(s => s.id === songId);
+      if (song) return song;
+
+      if (songId.startsWith('yt_')) {
+        const videoId = songId.replace('yt_', '');
+        const res = await fetch(`${BACKEND_URL}/api/youtube/video/${videoId}`);
+        if (res.ok) {
+          const data = await res.json();
+          return {
+            id: songId,
+            title: data.title,
+            artist: data.artist,
+            youtube_url: `https://www.youtube.com/watch?v=${videoId}`,
+            coverUrl: data.coverUrl,
+            durationSeconds: data.durationSeconds
+          };
+        }
       }
-      return songs;
+      return null;
+    } catch {
+      return null;
     }
   },
 
   async addSong(title: string, artist: string, youtubeUrl: string): Promise<Song> {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase
-        .from('songs')
-        .insert([{ title, artist, youtube_url: youtubeUrl }])
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
-    } else {
-      const songs = await this.getSongs();
-      const newSong: Song = {
-        id: Math.random().toString(36).substr(2, 9),
+    const videoId = getYoutubeVideoId(youtubeUrl, '');
+    const coverUrl = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+    
+    const res = await fetch(`${BACKEND_URL}/api/tracks/cache`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        videoId,
         title,
         artist,
-        youtube_url: youtubeUrl,
-        created_at: new Date().toISOString()
-      };
-      songs.push(newSong);
-      await AsyncStorage.setItem('mock_shared_songs', JSON.stringify(songs));
-      return newSong;
-    }
+        coverUrl,
+        duration: '03:00',
+        durationSeconds: 180,
+        genre: 'Streaming'
+      })
+    });
+    
+    if (!res.ok) throw new Error('Failed to cache track on backend');
+    
+    return {
+      id: `yt_${videoId}`,
+      title,
+      artist,
+      youtube_url: youtubeUrl,
+      coverUrl,
+      durationSeconds: 180
+    };
   },
 
   // ==========================================
-  // PLAYLISTS (Isolated by User ID)
+  // PLAYLISTS (Neon DB persistent)
   // ==========================================
   async getPlaylists(userId: string): Promise<Playlist[]> {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase
-        .from('playlists')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data || [];
-    } else {
-      return await getUserLocal<Playlist[]>(userId, 'playlists', []);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/user/playlists?userId=${userId}`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.map((p: any) => ({
+        id: p.id,
+        user_id: userId,
+        name: p.name,
+        cover_image: p.coverUrl || p.cover_image,
+        created_at: new Date().toISOString(),
+        songs: p.songs?.map((s: any) => ({
+          id: s.id,
+          title: s.title,
+          artist: s.artist,
+          youtube_url: `https://www.youtube.com/watch?v=${s.videoId}`,
+          coverUrl: s.coverUrl,
+          durationSeconds: s.durationSeconds
+        })) || []
+      }));
+    } catch {
+      return [];
     }
   },
 
   async createPlaylist(userId: string, name: string, coverImage?: string): Promise<Playlist> {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase
-        .from('playlists')
-        .insert([{ user_id: userId, name, cover_image: coverImage || null }])
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
-    } else {
-      const playlists = await getUserLocal<Playlist[]>(userId, 'playlists', []);
-      const newPlaylist: Playlist = {
-        id: Math.random().toString(36).substr(2, 9),
-        user_id: userId,
+    const res = await fetch(`${BACKEND_URL}/api/user/playlists`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId,
         name,
-        cover_image: coverImage || null,
-        created_at: new Date().toISOString()
-      };
-      playlists.push(newPlaylist);
-      await saveUserLocal(userId, 'playlists', playlists);
-      return newPlaylist;
-    }
+        description: 'Mobile App Playlist',
+        coverUrl: coverImage || null
+      })
+    });
+    if (!res.ok) throw new Error('Failed to create playlist');
+    const data = await res.json();
+    return {
+      id: data.id.toString(),
+      user_id: userId,
+      name: data.name,
+      cover_image: data.cover_url || coverImage || null,
+      created_at: new Date().toISOString(),
+      songs: []
+    };
   },
 
   async deletePlaylist(userId: string, playlistId: string): Promise<void> {
-    if (isSupabaseConfigured) {
-      const { error } = await supabase
-        .from('playlists')
-        .delete()
-        .eq('id', playlistId)
-        .eq('user_id', userId);
-      if (error) throw error;
-    } else {
-      let playlists = await getUserLocal<Playlist[]>(userId, 'playlists', []);
-      playlists = playlists.filter(p => p.id !== playlistId);
-      await saveUserLocal(userId, 'playlists', playlists);
-
-      // Clean up local playlist songs
-      let playlistSongs = await getUserLocal<PlaylistSong[]>(userId, 'playlist_songs', []);
-      playlistSongs = playlistSongs.filter(ps => ps.playlist_id !== playlistId);
-      await saveUserLocal(userId, 'playlist_songs', playlistSongs);
-    }
+    const res = await fetch(`${BACKEND_URL}/api/user/playlists/${playlistId}`, {
+      method: 'DELETE'
+    });
+    if (!res.ok) throw new Error('Failed to delete playlist');
   },
 
   // ==========================================
   // PLAYLIST SONGS
   // ==========================================
   async getSongsInPlaylist(userId: string, playlistId: string): Promise<Song[]> {
-    if (isSupabaseConfigured) {
-      // Fetch details by joining tables under the user's RLS permissions
-      const { data, error } = await supabase
-        .from('playlist_songs')
-        .select('songs (*)')
-        .eq('playlist_id', playlistId);
-      
-      if (error) throw error;
-      return (data || []).map((item: any) => item.songs).filter(Boolean);
-    } else {
-      const playlistSongs = await getUserLocal<PlaylistSong[]>(userId, 'playlist_songs', []);
-      const songIds = playlistSongs.filter(ps => ps.playlist_id === playlistId).map(ps => ps.song_id);
-      const allSongs = await this.getSongs();
-      return allSongs.filter(s => songIds.includes(s.id));
-    }
+    const playlists = await this.getPlaylists(userId);
+    const playlist = playlists.find(p => p.id === playlistId);
+    return playlist?.songs || [];
   },
 
   async addSongToPlaylist(userId: string, playlistId: string, songId: string): Promise<void> {
-    if (isSupabaseConfigured) {
-      const { error } = await supabase
-        .from('playlist_songs')
-        .insert([{ playlist_id: playlistId, song_id: songId }]);
-      if (error) throw error;
-    } else {
-      const playlistSongs = await getUserLocal<PlaylistSong[]>(userId, 'playlist_songs', []);
-      const exists = playlistSongs.some(ps => ps.playlist_id === playlistId && ps.song_id === songId);
-      if (!exists) {
-        playlistSongs.push({
-          id: Math.random().toString(36).substr(2, 9),
-          playlist_id: playlistId,
-          song_id: songId
-        });
-        await saveUserLocal(userId, 'playlist_songs', playlistSongs);
-      }
-    }
+    const videoId = getYoutubeVideoId('', songId);
+    const allSongs = await this.getSongs();
+    const song = allSongs.find(s => s.id === songId);
+    
+    const res = await fetch(`${BACKEND_URL}/api/user/playlists/songs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        playlistId,
+        songVideoId: videoId,
+        title: song?.title || 'Track',
+        artist: song?.artist || 'Unknown Artist',
+        coverUrl: getSongCoverUrl(song),
+        duration: '03:00',
+        durationSeconds: 180
+      })
+    });
+    if (!res.ok) throw new Error('Failed to add song to playlist');
   },
 
   async removeSongFromPlaylist(userId: string, playlistId: string, songId: string): Promise<void> {
-    if (isSupabaseConfigured) {
-      const { error } = await supabase
-        .from('playlist_songs')
-        .delete()
-        .eq('playlist_id', playlistId)
-        .eq('song_id', songId);
-      if (error) throw error;
-    } else {
-      let playlistSongs = await getUserLocal<PlaylistSong[]>(userId, 'playlist_songs', []);
-      playlistSongs = playlistSongs.filter(ps => !(ps.playlist_id === playlistId && ps.song_id === songId));
-      await saveUserLocal(userId, 'playlist_songs', playlistSongs);
-    }
+    const videoId = getYoutubeVideoId('', songId);
+    const res = await fetch(`${BACKEND_URL}/api/user/playlists/songs?playlistId=${playlistId}&songVideoId=${videoId}`, {
+      method: 'DELETE'
+    });
+    if (!res.ok) throw new Error('Failed to remove song from playlist');
   },
 
   // ==========================================
-  // LIKED SONGS (FAVORITES) (Isolated by User ID)
+  // LIKED SONGS (FAVORITES)
   // ==========================================
   async getFavorites(userId: string): Promise<Song[]> {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase
-        .from('liked_songs')
-        .select('songs (*)')
-        .eq('user_id', userId);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/user/likes?userId=${userId}`);
+      if (!res.ok) return [];
+      const likes: string[] = await res.json();
       
-      if (error) throw error;
-      return (data || []).map((item: any) => item.songs).filter(Boolean);
-    } else {
-      const favorites = await getUserLocal<LikedSong[]>(userId, 'liked_songs', []);
-      const userFavIds = favorites.map(f => f.song_id);
       const allSongs = await this.getSongs();
-      return allSongs.filter(s => userFavIds.includes(s.id));
+      return allSongs.filter(s => {
+        const videoId = getYoutubeVideoId(s.youtube_url || '', s.id);
+        return likes.includes(videoId);
+      });
+    } catch {
+      return [];
     }
   },
 
   async isFavorite(userId: string, songId: string): Promise<boolean> {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase
-        .from('liked_songs')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('song_id', songId)
-        .maybeSingle();
-      if (error) return false;
-      return !!data;
-    } else {
-      const favorites = await getUserLocal<LikedSong[]>(userId, 'liked_songs', []);
-      return favorites.some(f => f.song_id === songId);
+    try {
+      const videoId = getYoutubeVideoId('', songId);
+      const res = await fetch(`${BACKEND_URL}/api/user/likes?userId=${userId}`);
+      if (!res.ok) return false;
+      const likes: string[] = await res.json();
+      return likes.includes(videoId);
+    } catch {
+      return false;
     }
   },
 
   async toggleFavorite(userId: string, songId: string): Promise<boolean> {
+    const videoId = getYoutubeVideoId('', songId);
     const isFav = await this.isFavorite(userId, songId);
     if (isFav) {
-      if (isSupabaseConfigured) {
-        const { error } = await supabase
-          .from('liked_songs')
-          .delete()
-          .eq('user_id', userId)
-          .eq('song_id', songId);
-        if (error) throw error;
-      } else {
-        let favorites = await getUserLocal<LikedSong[]>(userId, 'liked_songs', []);
-        favorites = favorites.filter(f => f.song_id !== songId);
-        await saveUserLocal(userId, 'liked_songs', favorites);
-      }
+      const res = await fetch(`${BACKEND_URL}/api/user/likes?userId=${userId}&videoId=${videoId}`, {
+        method: 'DELETE'
+      });
+      if (!res.ok) throw new Error('Failed to unlike song');
       return false;
     } else {
-      if (isSupabaseConfigured) {
-        const { error } = await supabase
-          .from('liked_songs')
-          .insert([{ user_id: userId, song_id: songId }]);
-        if (error) throw error;
-      } else {
-        const favorites = await getUserLocal<LikedSong[]>(userId, 'liked_songs', []);
-        favorites.push({
-          id: Math.random().toString(36).substr(2, 9),
-          user_id: userId,
-          song_id: songId,
-          created_at: new Date().toISOString()
-        });
-        await saveUserLocal(userId, 'liked_songs', favorites);
-      }
+      const res = await fetch(`${BACKEND_URL}/api/user/likes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, videoId })
+      });
+      if (!res.ok) throw new Error('Failed to like song');
       return true;
     }
   },
 
   // ==========================================
-  // RECENTLY PLAYED (Isolated by User ID)
+  // RECENTLY PLAYED
   // ==========================================
   async getRecentlyPlayed(userId: string): Promise<Song[]> {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase
-        .from('recently_played')
-        .select('songs (*)')
-        .eq('user_id', userId)
-        .order('played_at', { ascending: false })
-        .limit(10);
-      
-      if (error) throw error;
-      
-      const songs = (data || []).map((item: any) => item.songs).filter(Boolean);
-      const seenIds = new Set<string>();
-      return songs.filter((s: Song) => {
-        if (seenIds.has(s.id)) return false;
-        seenIds.add(s.id);
-        return true;
-      });
-    } else {
-      const history = await getUserLocal<RecentlyPlayed[]>(userId, 'recently_played', []);
-      const userHistory = history.sort((a, b) => new Date(b.played_at).getTime() - new Date(a.played_at).getTime());
-      
-      const allSongs = await this.getSongs();
-      const recentSongs: Song[] = [];
-      const seenIds = new Set<string>();
-      
-      for (const record of userHistory) {
-        const song = allSongs.find(s => s.id === record.song_id);
-        if (song && !seenIds.has(song.id)) {
-          seenIds.add(song.id);
-          recentSongs.push(song);
-          if (recentSongs.length >= 10) break;
-        }
-      }
-      return recentSongs;
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/user/history?userId=${userId}`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.map((h: any) => ({
+        id: `yt_${h.song_id}`,
+        title: h.song_title,
+        artist: h.artist,
+        youtube_url: `https://www.youtube.com/watch?v=${h.song_id}`,
+        coverUrl: `https://img.youtube.com/vi/${h.song_id}/hqdefault.jpg`,
+        durationSeconds: 180
+      }));
+    } catch {
+      return [];
     }
   },
 
   async recordRecentlyPlayed(userId: string, songId: string): Promise<void> {
-    if (isSupabaseConfigured) {
-      const { error } = await supabase
-        .from('recently_played')
-        .insert([{ user_id: userId, song_id: songId }]);
-      if (error) throw error;
-    } else {
-      const history = await getUserLocal<RecentlyPlayed[]>(userId, 'recently_played', []);
-      history.push({
-        id: Math.random().toString(36).substr(2, 9),
-        user_id: userId,
-        song_id: songId,
-        played_at: new Date().toISOString()
+    try {
+      const allSongs = await this.getSongs();
+      const song = allSongs.find(s => s.id === songId);
+      const title = song?.title || 'Unknown Song';
+      const artist = song?.artist || 'Unknown Artist';
+      const videoId = getYoutubeVideoId('', songId);
+      
+      await fetch(`${BACKEND_URL}/api/user/history`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          songVideoId: videoId,
+          title,
+          artist
+        })
       });
-      await saveUserLocal(userId, 'recently_played', history);
+    } catch (err) {
+      console.warn('Error recording recently played to server:', err);
     }
   },
 
   // ==========================================
-  // SEARCH HISTORY (Isolated by User ID)
+  // SEARCH HISTORY
   // ==========================================
   async getSearchHistory(userId: string): Promise<SearchHistory[]> {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase
-        .from('search_history')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(15);
-      if (error) throw error;
-      return data || [];
-    } else {
-      return await getUserLocal<SearchHistory[]>(userId, 'search_history', []);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/user/search-history?userId=${userId}`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.map((item: any) => ({
+        id: item.id.toString(),
+        user_id: userId,
+        query: item.query,
+        created_at: item.searched_at
+      }));
+    } catch {
+      return [];
     }
   },
 
   async addSearchQuery(userId: string, query: string): Promise<void> {
     if (!query.trim()) return;
-    if (isSupabaseConfigured) {
-      const { error } = await supabase
-        .from('search_history')
-        .insert([{ user_id: userId, query: query.trim() }]);
-      if (error) throw error;
-    } else {
-      const history = await getUserLocal<SearchHistory[]>(userId, 'search_history', []);
-      // Remove duplicate queries to keep it clean
-      const filtered = history.filter(h => h.query.toLowerCase() !== query.trim().toLowerCase());
-      filtered.unshift({
-        id: Math.random().toString(36).substr(2, 9),
-        user_id: userId,
-        query: query.trim(),
-        created_at: new Date().toISOString()
+    try {
+      await fetch(`${BACKEND_URL}/api/user/search-history`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, query: query.trim() })
       });
-      await saveUserLocal(userId, 'search_history', filtered.slice(0, 15));
+    } catch (err) {
+      console.warn('Error adding search query:', err);
     }
   },
 
   async clearSearchHistory(userId: string): Promise<void> {
-    if (isSupabaseConfigured) {
-      const { error } = await supabase
-        .from('search_history')
-        .delete()
-        .eq('user_id', userId);
-      if (error) throw error;
-    } else {
-      await saveUserLocal(userId, 'search_history', []);
+    try {
+      await fetch(`${BACKEND_URL}/api/user/search-history?userId=${userId}`, {
+        method: 'DELETE'
+      });
+    } catch (err) {
+      console.warn('Error clearing search history:', err);
     }
   },
 
   // ==========================================
-  // SETTINGS (Isolated by User ID)
+  // SETTINGS (Local AsyncStorage cache)
   // ==========================================
   async getSettings(userId: string): Promise<Settings> {
     const defaultSettings: Settings = {
@@ -512,238 +546,97 @@ export const dbService = {
       audio_quality: 'high',
       notifications: true
     };
-
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase
-        .from('settings')
-        .select('*')
-        .eq('user_id', userId)
-        .maybeSingle();
-      
-      if (error || !data) {
-        return defaultSettings;
-      }
-      return data as Settings;
-    } else {
-      return await getUserLocal<Settings>(userId, 'settings', defaultSettings);
-    }
+    return await getUserLocal<Settings>(userId, 'settings', defaultSettings);
   },
 
   async updateSettings(userId: string, updates: Partial<Omit<Settings, 'id' | 'user_id'>>): Promise<Settings> {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase
-        .from('settings')
-        .update(updates)
-        .eq('user_id', userId)
-        .select()
-        .single();
-      if (error) throw error;
-      return data as Settings;
-    } else {
-      const current = await this.getSettings(userId);
-      const updated = { ...current, ...updates };
-      await saveUserLocal(userId, 'settings', updated);
-      return updated;
-    }
+    const current = await this.getSettings(userId);
+    const updated = { ...current, ...updates };
+    await saveUserLocal(userId, 'settings', updated);
+    return updated;
   },
 
   // ==========================================
-  // DOWNLOADS (Isolated by User ID)
+  // DOWNLOADS (Local AsyncStorage cache)
   // ==========================================
   async getDownloads(userId: string): Promise<Song[]> {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase
-        .from('downloads')
-        .select('songs (*)')
-        .eq('user_id', userId);
-      if (error) throw error;
-      return (data || []).map((item: any) => item.songs).filter(Boolean);
-    } else {
-      const downloads = await getUserLocal<Download[]>(userId, 'downloads', []);
-      const songIds = downloads.map(d => d.song_id);
-      const allSongs = await this.getSongs();
-      return allSongs.filter(s => songIds.includes(s.id));
-    }
+    const downloads = await getUserLocal<Download[]>(userId, 'downloads', []);
+    const songIds = downloads.map(d => d.song_id);
+    const allSongs = await this.getSongs();
+    return allSongs.filter(s => songIds.includes(s.id));
   },
 
   async isDownloaded(userId: string, songId: string): Promise<boolean> {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase
-        .from('downloads')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('song_id', songId)
-        .maybeSingle();
-      if (error) return false;
-      return !!data;
-    } else {
-      const downloads = await getUserLocal<Download[]>(userId, 'downloads', []);
-      return downloads.some(d => d.song_id === songId);
-    }
+    const downloads = await getUserLocal<Download[]>(userId, 'downloads', []);
+    return downloads.some(d => d.song_id === songId);
   },
 
   async toggleDownload(userId: string, songId: string): Promise<boolean> {
     const isDown = await this.isDownloaded(userId, songId);
     if (isDown) {
-      if (isSupabaseConfigured) {
-        const { error } = await supabase
-          .from('downloads')
-          .delete()
-          .eq('user_id', userId)
-          .eq('song_id', songId);
-        if (error) throw error;
-      } else {
-        let downloads = await getUserLocal<Download[]>(userId, 'downloads', []);
-        downloads = downloads.filter(d => d.song_id !== songId);
-        await saveUserLocal(userId, 'downloads', downloads);
-      }
+      let downloads = await getUserLocal<Download[]>(userId, 'downloads', []);
+      downloads = downloads.filter(d => d.song_id !== songId);
+      await saveUserLocal(userId, 'downloads', downloads);
       return false;
     } else {
-      if (isSupabaseConfigured) {
-        const { error } = await supabase
-          .from('downloads')
-          .insert([{ user_id: userId, song_id: songId }]);
-        if (error) throw error;
-      } else {
-        const downloads = await getUserLocal<Download[]>(userId, 'downloads', []);
-        downloads.push({
-          id: Math.random().toString(36).substr(2, 9),
-          user_id: userId,
-          song_id: songId,
-          downloaded_at: new Date().toISOString()
-        });
-        await saveUserLocal(userId, 'downloads', downloads);
-      }
+      const downloads = await getUserLocal<Download[]>(userId, 'downloads', []);
+      downloads.push({
+        id: Math.random().toString(36).substr(2, 9),
+        user_id: userId,
+        song_id: songId,
+        downloaded_at: new Date().toISOString()
+      });
+      await saveUserLocal(userId, 'downloads', downloads);
       return true;
     }
   },
 
   // ==========================================
-  // LISTENING HISTORY (Isolated by User ID)
+  // LISTENING HISTORY
   // ==========================================
   async getListeningHistory(userId: string): Promise<Song[]> {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase
-        .from('listening_history')
-        .select('songs (*)')
-        .eq('user_id', userId)
-        .order('listened_at', { ascending: false })
-        .limit(50);
-      if (error) throw error;
-      return (data || []).map((item: any) => item.songs).filter(Boolean);
-    } else {
-      const history = await getUserLocal<ListeningHistory[]>(userId, 'listening_history', []);
-      const sorted = history.sort((a, b) => new Date(b.listened_at).getTime() - new Date(a.listened_at).getTime());
-      const allSongs = await this.getSongs();
-      return sorted.map(h => allSongs.find(s => s.id === h.song_id)).filter(Boolean) as Song[];
-    }
+    return await this.getRecentlyPlayed(userId);
   },
 
   async recordListeningEvent(userId: string, songId: string, durationSeconds: number): Promise<void> {
-    if (isSupabaseConfigured) {
-      const { error } = await supabase
-        .from('listening_history')
-        .insert([{ user_id: userId, song_id: songId, duration_seconds: durationSeconds }]);
-      if (error) throw error;
-    } else {
-      const history = await getUserLocal<ListeningHistory[]>(userId, 'listening_history', []);
-      history.push({
-        id: Math.random().toString(36).substr(2, 9),
-        user_id: userId,
-        song_id: songId,
-        duration_seconds: durationSeconds,
-        listened_at: new Date().toISOString()
-      });
-      await saveUserLocal(userId, 'listening_history', history);
-    }
+    await this.recordRecentlyPlayed(userId, songId);
   },
 
   // ==========================================
-  // ADMIN PANEL APIS (Bypass user_id filters)
+  // ADMIN PANEL APIS
   // ==========================================
   async isAdmin(userId: string): Promise<boolean> {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase
-        .from('users')
-        .select('role')
-        .eq('id', userId)
-        .single();
-      if (error || !data) return false;
-      return data.role === 'admin';
-    } else {
-      // Mock admin check: users named "Admin" or email admin@melo.co are admin
-      const userStr = await AsyncStorage.getItem('mock_current_user');
-      if (!userStr) return false;
-      const user = JSON.parse(userStr);
-      return user.role === 'admin' || user.email === 'admin@melo.co';
-    }
+    const userStr = await AsyncStorage.getItem('mock_current_user');
+    if (!userStr) return false;
+    const user = JSON.parse(userStr);
+    return user.role === 'admin';
   },
 
   async adminGetAllUsers(): Promise<DbUser[]> {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data || [];
-    } else {
-      // Retrieve registered mock users
-      const mockUsersStr = await AsyncStorage.getItem('mock_registered_users');
-      return mockUsersStr ? JSON.parse(mockUsersStr) : [];
-    }
+    return [];
   },
 
   async adminGetAllPlaylists(): Promise<Playlist[]> {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase
-        .from('playlists')
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data || [];
-    } else {
-      // In mock mode, we would have to collect from all keys starting with melo_user_..._playlists
-      const allKeys = await AsyncStorage.getAllKeys();
-      const playlistKeys = allKeys.filter(k => k.startsWith('melo_user_') && k.endsWith('_playlists'));
-      let allPlaylists: Playlist[] = [];
-      for (const key of playlistKeys) {
-        const playlistsStr = await AsyncStorage.getItem(key);
-        if (playlistsStr) {
-          allPlaylists = allPlaylists.concat(JSON.parse(playlistsStr));
-        }
-      }
-      return allPlaylists;
-    }
+    return [];
   },
 
   async adminGetAllListeningHistory(): Promise<ListeningHistory[]> {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase
-        .from('listening_history')
-        .select('*')
-        .order('listened_at', { ascending: false });
-      if (error) throw error;
-      return data || [];
-    } else {
-      const allKeys = await AsyncStorage.getAllKeys();
-      const historyKeys = allKeys.filter(k => k.startsWith('melo_user_') && k.endsWith('_listening_history'));
-      let allHistory: ListeningHistory[] = [];
-      for (const key of historyKeys) {
-        const historyStr = await AsyncStorage.getItem(key);
-        if (historyStr) {
-          allHistory = allHistory.concat(JSON.parse(historyStr));
-        }
-      }
-      return allHistory;
-    }
+    return [];
   },
 
   // ==========================================
-  // JAM ROOM APIS
+  // JAM ROOM APIS (Neon DB persistent)
   // ==========================================
   async createJam(roomId: string, password: string, creatorId: string): Promise<Jam> {
-    const jamData = {
+    const res = await fetch(`${BACKEND_URL}/api/jams/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password, creatorId, capacity: 10 })
+    });
+    if (!res.ok) throw new Error('Failed to create Jam Room on server');
+    
+    return {
+      id: roomId,
       room_id: roomId,
       password,
       creator_id: creatorId,
@@ -753,83 +646,137 @@ export const dbService = {
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
-
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase
-        .from('jams')
-        .insert([jamData])
-        .select()
-        .single();
-      if (error) throw error;
-      return data as Jam;
-    } else {
-      const jamsStr = await AsyncStorage.getItem('mock_jams');
-      const jams: Jam[] = jamsStr ? JSON.parse(jamsStr) : [];
-      const newJam: Jam = {
-        id: Math.random().toString(36).substr(2, 9),
-        ...jamData
-      };
-      jams.push(newJam);
-      await AsyncStorage.setItem('mock_jams', JSON.stringify(jams));
-      return newJam;
-    }
   },
 
   async getJam(roomId: string): Promise<Jam | null> {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase
-        .from('jams')
-        .select('*')
-        .eq('room_id', roomId)
-        .maybeSingle();
-      if (error) return null;
-      return data as Jam;
-    } else {
-      const jamsStr = await AsyncStorage.getItem('mock_jams');
-      const jams: Jam[] = jamsStr ? JSON.parse(jamsStr) : [];
-      const jam = jams.find(j => j.room_id === roomId);
-      return jam || null;
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/jams/${roomId}`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (!data.success || !data.jam) return null;
+      
+      return {
+        id: data.jam.room_id,
+        room_id: data.jam.room_id,
+        creator_id: data.jam.creator_id,
+        current_song_id: data.jam.current_song_id,
+        current_song_progress: data.jam.current_song_progress,
+        current_song_is_playing: data.jam.current_song_is_playing,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+    } catch {
+      return null;
     }
   },
 
   async updateJam(roomId: string, updates: Partial<Omit<Jam, 'id' | 'room_id' | 'creator_id'>>): Promise<void> {
-    const fullUpdates = {
-      ...updates,
-      updated_at: new Date().toISOString()
-    };
-
-    if (isSupabaseConfigured) {
-      const { error } = await supabase
-        .from('jams')
-        .update(fullUpdates)
-        .eq('room_id', roomId);
-      if (error) throw error;
-    } else {
-      const jamsStr = await AsyncStorage.getItem('mock_jams');
-      let jams: Jam[] = jamsStr ? JSON.parse(jamsStr) : [];
-      jams = jams.map(j => {
-        if (j.room_id === roomId) {
-          return { ...j, ...fullUpdates };
+    try {
+      const payload: any = {};
+      if (updates.current_song_id !== undefined) payload.currentSongId = updates.current_song_id;
+      if (updates.current_song_progress !== undefined) payload.progress = updates.current_song_progress;
+      if (updates.current_song_is_playing !== undefined) payload.isPlaying = updates.current_song_is_playing;
+      
+      if (updates.current_song_id) {
+        const allSongs = await this.getSongs();
+        const song = allSongs.find(s => s.id === updates.current_song_id);
+        if (song) {
+          payload.songTitle = song.title;
+          payload.songArtist = song.artist;
+          payload.songCoverUrl = getSongCoverUrl(song);
         }
-        return j;
+      }
+      
+      await fetch(`${BACKEND_URL}/api/jams/${roomId}/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
       });
-      await AsyncStorage.setItem('mock_jams', JSON.stringify(jams));
+    } catch (err) {
+      console.warn('Failed to update Jam room on server:', err);
     }
   },
 
   async deleteJam(roomId: string): Promise<void> {
-    if (isSupabaseConfigured) {
-      const { error } = await supabase
-        .from('jams')
-        .delete()
-        .eq('room_id', roomId);
-      if (error) throw error;
-    } else {
-      const jamsStr = await AsyncStorage.getItem('mock_jams');
-      let jams: Jam[] = jamsStr ? JSON.parse(jamsStr) : [];
-      jams = jams.filter(j => j.room_id !== roomId);
-      await AsyncStorage.setItem('mock_jams', JSON.stringify(jams));
+    try {
+      await fetch(`${BACKEND_URL}/api/jams/${roomId}`, {
+        method: 'DELETE'
+      });
+    } catch (err) {
+      console.warn('Failed to delete Jam room on server:', err);
+    }
+  },
+
+  // ==========================================
+  // JAM CHAT APIS
+  // ==========================================
+  async getJamMessages(roomId: string): Promise<JamMessage[]> {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/jams/${roomId}/messages`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.success && Array.isArray(data.messages) ? data.messages.map((m: any) => ({
+        id: m.id ? m.id.toString() : Math.random().toString(36).substring(7),
+        room_id: roomId,
+        username: m.username,
+        message: m.message,
+        created_at: m.created_at
+      })) : [];
+    } catch {
+      return [];
+    }
+  },
+
+  async sendChatMessage(roomId: string, username: string, message: string): Promise<JamMessage | null> {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/jams/${roomId}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, message })
+      });
+      if (!res.ok) throw new Error('Failed to send message');
+      const data = await res.json();
+      if (data.success && data.message) {
+        return {
+          id: data.message.id ? data.message.id.toString() : Math.random().toString(36).substring(7),
+          room_id: roomId,
+          username: data.message.username,
+          message: data.message.message,
+          created_at: data.message.created_at
+        };
+      }
+      return null;
+    } catch (err) {
+      console.warn('Failed to send chat message to server:', err);
+      return null;
+    }
+  },
+
+  // ==========================================
+  // AI SMART SEARCH (DB first -> YT fallback)
+  // ==========================================
+  async searchSongs(query: string): Promise<Song[]> {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/smart/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query })
+      });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      return (data.results || []).map((s: any) => ({
+        id: s.id,
+        title: s.title,
+        artist: s.artist,
+        youtube_url: s.youtube_url || (s.videoId ? `https://www.youtube.com/watch?v=${s.videoId}` : ''),
+        coverUrl: s.coverUrl || s.cover_url,
+        durationSeconds: s.durationSeconds || s.duration_seconds || 180
+      }));
+    } catch {
+      // Fuzzy match locally if offline
+      const all = await this.getSongs();
+      const q = query.toLowerCase().trim();
+      return all.filter(s => s.title.toLowerCase().includes(q) || s.artist.toLowerCase().includes(q));
     }
   }
 };
-

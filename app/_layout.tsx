@@ -1,13 +1,23 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { ActivityIndicator, View, Text, StyleSheet } from 'react-native';
+import { ActivityIndicator, View, Text, StyleSheet, Platform } from 'react-native';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { AuthProvider, useAuth } from '@/context/auth-context';
-import { PlayerProvider } from '@/context/player-context';
+import { PlayerProvider, usePlayer } from '@/context/player-context';
 import { AudioPlayer } from '@/components/audio-player';
+
+let WebView: any = null;
+if (Platform.OS !== 'web') {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    WebView = require('react-native-webview').WebView;
+  } catch (e) {
+    console.error('Failed to import react-native-webview:', e);
+  }
+}
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -15,7 +25,7 @@ export const unstable_settings = {
 
 function AppContent() {
   const { user, loading } = useAuth();
-  const colorScheme = useColorScheme();
+  const { registerWebView, handleWebViewMessage, playerHtml } = usePlayer();
 
   if (loading) {
     return (
@@ -36,6 +46,21 @@ function AppContent() {
         )}
       </Stack>
       {user && <AudioPlayer />}
+      {Platform.OS !== 'web' && WebView && (
+        <View style={{ position: 'absolute', width: 1, height: 1, bottom: -100, left: -100, opacity: 0, overflow: 'hidden' }}>
+          <WebView
+            ref={registerWebView}
+            style={{ width: 1, height: 1 }}
+            originWhitelist={['*']}
+            javaScriptEnabled={true}
+            domStorageEnabled={true}
+            mediaPlaybackRequiresUserAction={false}
+            allowsInlineMediaPlayback={true}
+            source={{ html: playerHtml, baseUrl: 'https://youtube.com' }}
+            onMessage={handleWebViewMessage}
+          />
+        </View>
+      )}
     </View>
   );
 }

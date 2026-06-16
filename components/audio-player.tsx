@@ -9,16 +9,19 @@ import {
   Dimensions, 
   ScrollView,
   TextInput,
-  Alert
+  Alert,
+  Image,
+  ActivityIndicator,
+  Animated
 } from 'react-native';
 import { usePlayer } from '@/context/player-context';
 import { useAuth } from '@/context/auth-context';
-import { dbService, Playlist, Song } from '@/services/db';
+import { dbService, Playlist, getSongCoverUrl } from '@/services/db';
 import { Ionicons } from '@expo/vector-icons';
 
 const { width, height } = Dimensions.get('window');
 
-type DetailTab = 'lyrics' | 'eq' | 'queue';
+type DetailTab = 'lyrics' | 'eq' | 'queue' | 'jam';
 type EqPreset = 'Flat' | 'Bass' | 'Treble' | 'Vocal' | 'Electronic';
 
 interface LyricLine {
@@ -78,6 +81,68 @@ const formatTime = (seconds: number) => {
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 };
 
+// Self-contained animated audio visualizer
+function AudioVisualizer({ isPlaying }: { isPlaying: boolean }) {
+  const barCount = 16;
+  const anims = useRef(Array.from({ length: barCount }, () => new Animated.Value(4))).current;
+
+  useEffect(() => {
+    let animations: Animated.CompositeAnimation[] = [];
+    if (isPlaying) {
+      animations = anims.map((anim) => {
+        const duration = 250 + Math.random() * 300;
+        return Animated.loop(
+          Animated.sequence([
+            Animated.timing(anim, {
+              toValue: 8 + Math.random() * 26,
+              duration: duration,
+              useNativeDriver: false,
+            }),
+            Animated.timing(anim, {
+              toValue: 4,
+              duration: duration,
+              useNativeDriver: false,
+            }),
+          ])
+        );
+      });
+      animations.forEach(a => a.start());
+    } else {
+      anims.forEach(anim => {
+        Animated.timing(anim, {
+          toValue: 4,
+          duration: 350,
+          useNativeDriver: false,
+        }).start();
+      });
+    }
+
+    return () => {
+      if (animations.length > 0) {
+        animations.forEach(a => a.stop());
+      }
+    };
+  }, [isPlaying, anims]);
+
+  return (
+    <View style={styles.visualizerContainer}>
+      {anims.map((anim, idx) => (
+        <Animated.View 
+          key={`visualizer-bar-${idx}`}
+          style={[
+            styles.visualizerBar,
+            {
+              height: anim,
+              backgroundColor: isPlaying ? '#FF007A' : '#4B5563',
+              opacity: isPlaying ? 0.95 : 0.45,
+            }
+          ]}
+        />
+      ))}
+    </View>
+  );
+}
+
 export function AudioPlayer() {
   const { user } = useAuth();
   const {
@@ -93,7 +158,13 @@ export function AudioPlayer() {
     isExpanded,
     setIsExpanded,
     queue,
-    playSong
+    playSong,
+    jamRoom,
+    createJamRoom,
+    joinJamRoom,
+    leaveJamRoom,
+    chatMessages,
+    sendChatMessage
   } = usePlayer();
 
   const [isFav, setIsFav] = useState(false);
@@ -106,6 +177,15 @@ export function AudioPlayer() {
   const [detailTab, setDetailTab] = useState<DetailTab>('lyrics');
   const [activePreset, setActivePreset] = useState<EqPreset>('Flat');
   const [eqBands, setEqBands] = useState<number[]>([0, 0, 0, 0, 0]); // 5 frequency sliders
+
+  // Jam states
+  const [isCreatingTab, setIsCreatingTab] = useState(false);
+  const [jamPassword, setJamPassword] = useState('');
+  const [joinRoomId, setJoinRoomId] = useState('');
+  const [joinPassword, setJoinPassword] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
+  const [isJoining, setIsJoining] = useState(false);
+  const [chatMessageText, setChatMessageText] = useState('');
 
   // Scroll ref for lyrics
   const lyricsScrollRef = useRef<ScrollView>(null);
@@ -170,10 +250,9 @@ export function AudioPlayer() {
     checkFav();
   }, [currentSong, user]);
 
-  if (!currentSong || !user) return null;
-
   // Toggle Favorite
   const handleToggleFav = async () => {
+    if (!user || !currentSong) return;
     try {
       const result = await dbService.toggleFavorite(user.id, currentSong.id);
       setIsFav(result);
@@ -184,6 +263,7 @@ export function AudioPlayer() {
 
   // Open Add-to-Playlist
   const handleOpenPlaylists = async () => {
+    if (!user) return;
     try {
       const data = await dbService.getPlaylists(user.id);
       setPlaylists(data);
@@ -195,7 +275,7 @@ export function AudioPlayer() {
 
   // Add song to playlist
   const handleAddSongToPlaylist = async (playlistId: string, playlistName: string) => {
-    if (!user) return;
+    if (!user || !currentSong) return;
     try {
       await dbService.addSongToPlaylist(user.id, playlistId, currentSong.id);
       Alert.alert('Added', `"${currentSong.title}" added to playlist "${playlistName}"`);
@@ -207,7 +287,7 @@ export function AudioPlayer() {
 
   // Create playlist and add song
   const handleCreatePlaylist = async () => {
-    if (!user || !newPlaylistName.trim()) return;
+    if (!user || !currentSong || !newPlaylistName.trim()) return;
     try {
       const newPlaylist = await dbService.createPlaylist(user.id, newPlaylistName.trim());
       await dbService.addSongToPlaylist(user.id, newPlaylist.id, currentSong.id);
@@ -256,6 +336,8 @@ export function AudioPlayer() {
     }
   }, [activeLyricIndex]);
 
+  if (!currentSong || !user) return null;
+
   return (
     <>
       {/* 1. MINI FLOATING PLAYER */}
@@ -271,9 +353,10 @@ export function AudioPlayer() {
           
           <View style={styles.miniPlayerContent}>
             <View style={styles.miniInfo}>
-              <View style={styles.miniDisc}>
-                <Ionicons name="disc" size={24} color="#FF007A" />
-              </View>
+              <Image 
+                source={{ uri: getSongCoverUrl(currentSong) }} 
+                style={styles.miniArtworkImage} 
+              />
               <View style={styles.miniText}>
                 <Text style={styles.miniTitle} numberOfLines={1}>{currentSong.title}</Text>
                 <Text style={styles.miniArtist} numberOfLines={1}>{currentSong.artist}</Text>
@@ -329,13 +412,22 @@ export function AudioPlayer() {
 
           {/* Album Cover Art */}
           <View style={styles.artworkContainer}>
-            <View style={styles.artworkGlow}>
-              <Ionicons name="disc-outline" size={100} color="#FF007A" />
-              <Text style={styles.sourceTag}>
-                {currentSong.youtube_url.includes('youtube.com') ? 'YOUTUBE STREAM' : 'LOSSLESS'}
-              </Text>
+            <View style={styles.artworkFrame}>
+              <Image 
+                source={{ uri: getSongCoverUrl(currentSong) }} 
+                style={styles.artworkImage}
+                resizeMode="cover"
+              />
+              <View style={styles.artworkOverlay}>
+                <Text style={styles.sourceTag}>
+                  {currentSong.youtube_url.includes('youtube.com') ? 'YOUTUBE STREAM' : 'LOSSLESS'}
+                </Text>
+              </View>
             </View>
           </View>
+
+          {/* Audio Visualizer */}
+          <AudioVisualizer isPlaying={isPlaying} />
 
           {/* Track Metadata */}
           <View style={styles.metadataContainer}>
@@ -367,7 +459,7 @@ export function AudioPlayer() {
               onPress={() => setDetailTab('eq')}
             >
               <Text style={[styles.segmentText, detailTab === 'eq' && styles.segmentTextActive]}>
-                Equalizer
+                EQ
               </Text>
             </TouchableOpacity>
             <TouchableOpacity 
@@ -375,7 +467,15 @@ export function AudioPlayer() {
               onPress={() => setDetailTab('queue')}
             >
               <Text style={[styles.segmentText, detailTab === 'queue' && styles.segmentTextActive]}>
-                Play Queue
+                Queue
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={[styles.segmentBtn, detailTab === 'jam' && styles.segmentBtnActive]}
+              onPress={() => setDetailTab('jam')}
+            >
+              <Text style={[styles.segmentText, detailTab === 'jam' && styles.segmentTextActive]}>
+                Jam
               </Text>
             </TouchableOpacity>
           </View>
@@ -436,9 +536,14 @@ export function AudioPlayer() {
                       <Text style={styles.eqValText}>{eqBands[idx] > 0 ? `+${eqBands[idx]}` : eqBands[idx]} dB</Text>
                       <View style={styles.sliderTrackWrapper}>
                         <TouchableOpacity 
-                          style={styles.visualSliderBar}
+                          style={[styles.visualSliderBar, { height: 120 }]}
                           activeOpacity={0.8}
-                          onPress={() => updateEqBand(idx, Math.floor(Math.random() * 25) - 12)}
+                          onPress={(evt) => {
+                            const { locationY } = evt.nativeEvent;
+                            const ratio = Math.max(0, Math.min(1, locationY / 120));
+                            const dbVal = Math.round(12 - ratio * 24);
+                            updateEqBand(idx, dbVal);
+                          }}
                         >
                           <View style={[styles.visualSliderBg]} />
                           <View 
@@ -467,11 +572,9 @@ export function AudioPlayer() {
                       style={[styles.queueRow, isCurrent && styles.queueRowActive]}
                       onPress={() => playSong(song, queue)}
                     >
-                      <Ionicons 
-                        name={isCurrent && isPlaying ? "volume-medium" : "musical-notes-outline"} 
-                        size={18} 
-                        color={isCurrent ? "#FF007A" : "#6B7280"} 
-                        style={{ marginRight: 12 }}
+                      <Image 
+                        source={{ uri: getSongCoverUrl(song) }} 
+                        style={styles.queueArtworkImage} 
                       />
                       <View style={{ flex: 1 }}>
                         <Text style={[styles.queueTitle, isCurrent && styles.queueTitleActive]} numberOfLines={1}>
@@ -484,6 +587,219 @@ export function AudioPlayer() {
                   );
                 })}
               </ScrollView>
+            )}
+
+            {detailTab === 'jam' && (
+              <View style={{ flex: 1, paddingHorizontal: 16 }}>
+                {jamRoom ? (
+                  /* Active Jam Room View */
+                  <View style={{ flex: 1 }}>
+                    <View style={styles.broadcastStatus}>
+                      <View style={[styles.pulseDot, jamRoom.isHost ? styles.pulseDotHost : styles.pulseDotListener]} />
+                      <Text style={styles.broadcastText}>
+                        {jamRoom.isHost ? 'BROADCASTING LIVE (HOST)' : 'LISTENING LIVE (SYNCED)'}
+                      </Text>
+                    </View>
+
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 8 }}>
+                      <View>
+                        <Text style={styles.jamRoomIdLabel}>ROOM ID</Text>
+                        <Text style={styles.jamRoomIdValue}>{jamRoom.room_id}</Text>
+                      </View>
+                      
+                      <TouchableOpacity 
+                        style={[styles.shareBtn, { paddingVertical: 8, paddingHorizontal: 12, marginTop: 0, width: 'auto' }]} 
+                        onPress={() => {
+                          import('react-native').then(({ Share }) => {
+                            Share.share({
+                              message: `Join my Melo Music Jam Room!\nRoom ID: ${jamRoom.room_id}\nPassword: ${jamPassword || '(Secured)'}`
+                            }).catch(err => console.log(err));
+                          });
+                        }}
+                      >
+                        <Ionicons name="share-social-outline" size={14} color="#09090B" style={{ marginRight: 4 }} />
+                        <Text style={{ fontSize: 11, fontWeight: '800', color: '#09090B' }}>SHARE</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Chat Box */}
+                    <View style={[styles.chatSection, { height: 160 }]}>
+                      <Text style={styles.chatSectionTitle}>SESSION CHAT</Text>
+                      <ScrollView 
+                        style={styles.chatScrollView}
+                        contentContainerStyle={styles.chatContentContainer}
+                        ref={(ref) => {
+                          ref?.scrollToEnd({ animated: true });
+                        }}
+                      >
+                        {chatMessages.length === 0 ? (
+                          <Text style={styles.emptyChatText}>No messages yet. Start chatting!</Text>
+                        ) : (
+                          chatMessages.map((msg, index) => (
+                            <View key={msg.id || index} style={styles.chatMessageItem}>
+                              <Text style={styles.chatMessageUser}>{msg.username}</Text>
+                              <Text style={styles.chatMessageText}>{msg.message}</Text>
+                            </View>
+                          ))
+                        )}
+                      </ScrollView>
+                      <View style={styles.chatInputContainer}>
+                        <TextInput
+                          style={styles.chatInput}
+                          placeholder="Type a message..."
+                          placeholderTextColor="#6B7280"
+                          value={chatMessageText}
+                          onChangeText={setChatMessageText}
+                        />
+                        <TouchableOpacity 
+                          style={styles.chatSendBtn}
+                          onPress={() => {
+                            if (chatMessageText.trim()) {
+                              sendChatMessage(chatMessageText);
+                              setChatMessageText('');
+                            }
+                          }}
+                        >
+                          <Ionicons name="send" size={12} color="#09090B" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+
+                    <TouchableOpacity 
+                      style={[styles.leaveBtn, { paddingVertical: 10 }]} 
+                      onPress={() => {
+                        leaveJamRoom();
+                        Alert.alert('Left Jam', jamRoom.isHost ? 'You closed the Jam Room.' : 'You left the Jam Room.');
+                      }}
+                    >
+                      <Ionicons name="log-out-outline" size={16} color="#EF4444" style={{ marginRight: 6 }} />
+                      <Text style={styles.leaveBtnText}>
+                        {jamRoom.isHost ? 'Close Jam' : 'Leave Jam'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  /* Join / Create Form */
+                  <View style={{ flex: 1 }}>
+                    <View style={[styles.tabBar, { marginBottom: 12 }]}>
+                      <TouchableOpacity 
+                        style={[styles.tabBtn, !isCreatingTab && styles.tabBtnActive]} 
+                        onPress={() => setIsCreatingTab(false)}
+                      >
+                        <Text style={[styles.tabBtnText, !isCreatingTab && styles.tabBtnTextActive]}>Join Room</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity 
+                        style={[styles.tabBtn, isCreatingTab && styles.tabBtnActive]} 
+                        onPress={() => setIsCreatingTab(true)}
+                      >
+                        <Text style={[styles.tabBtnText, isCreatingTab && styles.tabBtnTextActive]}>Create Room</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {isCreatingTab ? (
+                      <View style={{ gap: 8 }}>
+                        <Text style={[styles.inputLabel, { marginBottom: 2 }]}>Set Room Password</Text>
+                        <TextInput
+                          style={[styles.textInput, { paddingVertical: 8 }]}
+                          placeholder="Enter password (e.g. 1234)"
+                          placeholderTextColor="#6B7280"
+                          secureTextEntry
+                          value={jamPassword}
+                          onChangeText={setJamPassword}
+                        />
+                        <TouchableOpacity 
+                          style={[styles.actionBtn, isCreating && styles.actionBtnDisabled, { paddingVertical: 10 }]}
+                          onPress={async () => {
+                            if (!jamPassword.trim()) {
+                              Alert.alert('Error', 'Please set a password for the room.');
+                              return;
+                            }
+                            try {
+                              setIsCreating(true);
+                              const id = await createJamRoom(jamPassword);
+                              Alert.alert('Room Created!', `Your 8-digit Room ID is ${id}`);
+                            } catch (err: any) {
+                              Alert.alert('Error', err.message || 'Failed to create room.');
+                            } finally {
+                              setIsCreating(false);
+                            }
+                          }}
+                          disabled={isCreating}
+                        >
+                          {isCreating ? (
+                            <ActivityIndicator size="small" color="#09090B" />
+                          ) : (
+                            <>
+                              <Ionicons name="add-circle-outline" size={18} color="#09090B" style={{ marginRight: 6 }} />
+                              <Text style={styles.actionBtnText}>Create Jam Room</Text>
+                            </>
+                          )}
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <View style={{ gap: 8 }}>
+                        <View>
+                          <Text style={[styles.inputLabel, { marginBottom: 2 }]}>Room ID (8 Digits)</Text>
+                          <TextInput
+                            style={[styles.textInput, { paddingVertical: 8 }]}
+                            placeholder="e.g. 58291039"
+                            placeholderTextColor="#6B7280"
+                            keyboardType="numeric"
+                            maxLength={8}
+                            value={joinRoomId}
+                            onChangeText={setJoinRoomId}
+                          />
+                        </View>
+
+                        <View>
+                          <Text style={[styles.inputLabel, { marginBottom: 2 }]}>Password</Text>
+                          <TextInput
+                            style={[styles.textInput, { paddingVertical: 8 }]}
+                            placeholder="Enter room password"
+                            placeholderTextColor="#6B7280"
+                            secureTextEntry
+                            value={joinPassword}
+                            onChangeText={setJoinPassword}
+                          />
+                        </View>
+
+                        <TouchableOpacity 
+                          style={[styles.actionBtn, isJoining && styles.actionBtnDisabled, { paddingVertical: 10 }]}
+                          onPress={async () => {
+                            if (joinRoomId.length !== 8) {
+                              Alert.alert('Error', 'Room ID must be exactly 8 digits.');
+                              return;
+                            }
+                            if (!joinPassword) {
+                              Alert.alert('Error', 'Please enter the room password.');
+                              return;
+                            }
+                            try {
+                              setIsJoining(true);
+                              await joinJamRoom(joinRoomId, joinPassword);
+                              Alert.alert('Joined!', `Successfully joined room ${joinRoomId}`);
+                            } catch (err: any) {
+                              Alert.alert('Error', err.message || 'Failed to join room.');
+                            } finally {
+                              setIsJoining(false);
+                            }
+                          }}
+                          disabled={isJoining}
+                        >
+                          {isJoining ? (
+                            <ActivityIndicator size="small" color="#09090B" />
+                          ) : (
+                            <>
+                              <Ionicons name="enter-outline" size={18} color="#09090B" style={{ marginRight: 6 }} />
+                              <Text style={styles.actionBtnText}>Join Jam Room</Text>
+                            </>
+                          )}
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                )}
+              </View>
             )}
           </View>
 
@@ -554,7 +870,7 @@ export function AudioPlayer() {
 
             <ScrollView style={styles.playlistList} contentContainerStyle={{ paddingBottom: 16 }}>
               {playlists.length === 0 ? (
-                <Text style={styles.emptyPlaylistsText}>You don't have any playlists yet.</Text>
+                <Text style={styles.emptyPlaylistsText}>You don&apos;t have any playlists yet.</Text>
               ) : (
                 playlists.map((p) => (
                   <TouchableOpacity 
@@ -649,9 +965,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
   },
-  miniDisc: {
-    marginRight: 10,
-  },
   miniText: {
     flex: 1,
   },
@@ -697,19 +1010,57 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   artworkContainer: {
-    height: height * 0.18,
+    height: height * 0.22,
     justifyContent: 'center',
+    alignItems: 'center',
+    marginVertical: 12,
+  },
+  artworkFrame: {
+    width: 160,
+    height: 160,
+    borderRadius: 16,
+    backgroundColor: '#1E1E22',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 0, 122, 0.35)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+    overflow: 'hidden',
+    shadowColor: '#FF007A',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.35,
+    shadowRadius: 15,
+    elevation: 8,
+  },
+  artworkImage: {
+    width: '100%',
+    height: '100%',
+    position: 'absolute',
+  },
+  artworkOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    paddingVertical: 4,
     alignItems: 'center',
   },
-  artworkGlow: {
-    width: 130,
-    height: 130,
-    borderRadius: 65,
-    backgroundColor: 'rgba(255, 0, 122, 0.03)',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 0, 122, 0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
+  miniArtworkImage: {
+    width: 38,
+    height: 38,
+    borderRadius: 8,
+    marginRight: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 0, 122, 0.2)',
+  },
+  queueArtworkImage: {
+    width: 32,
+    height: 32,
+    borderRadius: 6,
+    marginRight: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   sourceTag: {
     color: '#FF007A',
@@ -1105,5 +1456,202 @@ const styles = StyleSheet.create({
     color: '#09090B',
     fontSize: 14,
     fontWeight: '700',
+  },
+  broadcastStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1C1C1E',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    gap: 8,
+    alignSelf: 'center',
+    marginVertical: 4,
+  },
+  pulseDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  pulseDotHost: {
+    backgroundColor: '#FF007A',
+  },
+  pulseDotListener: {
+    backgroundColor: '#10B981',
+  },
+  broadcastText: {
+    color: '#ECEDEE',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  jamRoomIdLabel: {
+    color: '#6B7280',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  jamRoomIdValue: {
+    color: '#ECEDEE',
+    fontSize: 28,
+    fontWeight: '900',
+    letterSpacing: 2,
+  },
+  shareBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FF007A',
+    borderRadius: 12,
+  },
+  leaveBtn: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#EF4444',
+    borderRadius: 12,
+    marginTop: 8,
+  },
+  leaveBtnText: {
+    color: '#EF4444',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  tabBar: {
+    flexDirection: 'row',
+    backgroundColor: '#1E1E22',
+    borderRadius: 12,
+    padding: 4,
+  },
+  tabBtn: {
+    flex: 1,
+    paddingVertical: 8,
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  tabBtnActive: {
+    backgroundColor: '#2D2D34',
+  },
+  tabBtnText: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  tabBtnTextActive: {
+    color: '#ECEDEE',
+  },
+  inputLabel: {
+    color: '#9BA1A6',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  textInput: {
+    backgroundColor: '#18181B',
+    borderWidth: 1,
+    borderColor: '#27272A',
+    borderRadius: 12,
+    color: '#ECEDEE',
+    paddingHorizontal: 14,
+    fontSize: 14,
+  },
+  actionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FF007A',
+    borderRadius: 12,
+    marginTop: 4,
+  },
+  actionBtnDisabled: {
+    opacity: 0.6,
+  },
+  actionBtnText: {
+    color: '#09090B',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  chatSection: {
+    width: '100%',
+    backgroundColor: '#151518',
+    borderWidth: 1,
+    borderColor: '#252528',
+    borderRadius: 16,
+    padding: 12,
+    marginVertical: 4,
+  },
+  chatSectionTitle: {
+    color: '#FF007A',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 1,
+    marginBottom: 6,
+  },
+  chatScrollView: {
+    flex: 1,
+    marginBottom: 6,
+  },
+  chatContentContainer: {
+    gap: 6,
+  },
+  emptyChatText: {
+    color: '#6B7280',
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: 12,
+    fontStyle: 'italic',
+  },
+  chatMessageItem: {
+    backgroundColor: '#1E1E22',
+    borderRadius: 8,
+    padding: 6,
+  },
+  chatMessageUser: {
+    color: '#FF007A',
+    fontSize: 10,
+    fontWeight: '800',
+    marginBottom: 1,
+  },
+  chatMessageText: {
+    color: '#ECEDEE',
+    fontSize: 12,
+  },
+  chatInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  chatInput: {
+    flex: 1,
+    backgroundColor: '#1E1E22',
+    borderWidth: 1,
+    borderColor: '#2D2D34',
+    borderRadius: 8,
+    color: '#ECEDEE',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 12,
+  },
+  chatSendBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#FF007A',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  visualizerContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    gap: 4,
+    height: 38,
+    marginVertical: 10,
+  },
+  visualizerBar: {
+    width: 4,
+    borderRadius: 2,
   },
 });

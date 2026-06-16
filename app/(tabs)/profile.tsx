@@ -21,7 +21,7 @@ export default function ProfileScreen() {
   // Settings toggle states Replicated from Web / Database
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [losslessEnabled, setLosslessEnabled] = useState(true);
-  const [_theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
 
   useEffect(() => {
     const fetchStatsAndSettings = async () => {
@@ -143,6 +143,29 @@ export default function ProfileScreen() {
             </Text>
           </View>
         </TouchableOpacity>
+
+        {/* Toggle 3: Active Theme */}
+        <TouchableOpacity 
+          style={styles.menuItem} 
+          onPress={async () => {
+            if (!user) return;
+            try {
+              const nextVal = theme === 'dark' ? 'light' : 'dark';
+              setTheme(nextVal);
+              await dbService.updateSettings(user.id, { theme: nextVal });
+            } catch (err) {
+              console.error('Error toggling theme:', err);
+            }
+          }}
+        >
+          <Ionicons name="sunny-outline" size={20} color="#ECEDEE" />
+          <Text style={styles.menuItemText}>Active Theme</Text>
+          <View style={[styles.toggleBadge, theme === 'dark' ? styles.toggleBadgeActive : styles.toggleBadgeInactive]}>
+            <Text style={[styles.toggleBadgeText, theme === 'dark' ? styles.toggleBadgeTextActive : styles.toggleBadgeTextInactive]}>
+              {theme.toUpperCase()}
+            </Text>
+          </View>
+        </TouchableOpacity>
       </View>
 
       {/* Settings Options */}
@@ -152,6 +175,19 @@ export default function ProfileScreen() {
           <Ionicons name="shield-checkmark-outline" size={20} color="#ECEDEE" />
           <Text style={styles.menuItemText}>Privacy Policy</Text>
           <Ionicons name="chevron-forward" size={16} color="#6B7280" />
+        </TouchableOpacity>
+      </View>
+
+      {/* Developer Tools */}
+      <Text style={styles.sectionHeader}>DEVELOPER SUITE</Text>
+      <View style={styles.menuContainer}>
+        <TouchableOpacity 
+          style={styles.menuItem} 
+          onPress={() => router.push('/diagnostics' as any)}
+        >
+          <Ionicons name="pulse-outline" size={20} color="#FF007A" />
+          <Text style={[styles.menuItemText, { color: '#FF007A', fontWeight: '700' }]}>System Diagnostics</Text>
+          <Ionicons name="chevron-forward" size={16} color="#FF007A" />
         </TouchableOpacity>
       </View>
 
