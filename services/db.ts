@@ -122,8 +122,28 @@ try {
   console.warn('[dbService] Failed to read hostUri:', e);
 }
 
-export const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || `http://${devHost}:3000`;
+export const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://melo-black.vercel.app';
 console.log(`[dbService] Backend API configured at: ${BACKEND_URL}`);
+
+// Robust fetch helper with timeout to prevent hanging calls on native builds
+const nativeFetch = global.fetch;
+const fetchWithTimeout = async (resource: string | URL | Request, options: RequestInit & { timeout?: number } = {}): Promise<Response> => {
+  const { timeout = 8000 } = options;
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await nativeFetch(resource, {
+      ...options,
+      signal: controller.signal
+    });
+    clearTimeout(id);
+    return response;
+  } catch (error) {
+    clearTimeout(id);
+    throw error;
+  }
+};
+const fetch = fetchWithTimeout;
 
 if (isTunnel && !process.env.EXPO_PUBLIC_BACKEND_URL) {
   console.warn(

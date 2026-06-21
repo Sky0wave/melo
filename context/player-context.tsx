@@ -1,5 +1,5 @@
 import React, { createContext, useState, useEffect, useContext, useRef } from 'react';
-import { Song, dbService, BACKEND_URL } from '@/services/db';
+import { Song, dbService, BACKEND_URL, SEED_SONGS } from '@/services/db';
 import { useAuth } from './auth-context';
 import { isSupabaseConfigured } from '@/services/supabase-client';
 import { Platform, View } from 'react-native';
@@ -30,6 +30,20 @@ const playerHtml = `
     var player;
     var duration = 0;
     var lastTime = 0;
+
+    // Override page visibility and focus/blur to prevent YouTube player from auto-pausing in background
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', writable: false });
+    Object.defineProperty(document, 'hidden', { value: false, writable: false });
+    document.hasFocus = function() { return true; };
+    
+    // Stop all visibility and focus/blur event propagation
+    var preventSuspension = function(e) {
+      e.stopImmediatePropagation();
+    };
+    window.addEventListener('visibilitychange', preventSuspension, true);
+    document.addEventListener('visibilitychange', preventSuspension, true);
+    window.addEventListener('blur', preventSuspension, true);
+    document.addEventListener('blur', preventSuspension, true);
 
     function sendToRN(type, data) {
       if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
@@ -191,11 +205,11 @@ export const getAudioSourceForSong = (song: Song) => {
 
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
-  const [currentSong, setCurrentSong] = useState<Song | null>(null);
+  const [currentSong, setCurrentSong] = useState<Song | null>(SEED_SONGS[0]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(180); // Default simulated 3 minutes (180s)
-  const [queue, setQueue] = useState<Song[]>([]);
+  const [queue, setQueue] = useState<Song[]>(SEED_SONGS);
   const [isExpanded, setIsExpanded] = useState(false);
   
   // Jam room state
@@ -344,9 +358,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             playbackSubscriptionRef.current = null;
           }
           playerRef.current.pause();
-          playerRef.current.release();
+          playerRef.current.remove();
         } catch (e) {
-          console.log('Error releasing player:', e);
+          console.log('Error removing player:', e);
         }
         playerRef.current = null;
       }
@@ -368,6 +382,42 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       if (videoId) {
         sendToWebView('load', { videoId, autoplay: shouldPlay, startTime: progress });
       }
+
+      // Keep background audio thread active by playing a silent loop via expo-audio
+      if (isAudioInitializedRef.current) {
+        try {
+          const { createAudioPlayer } = require('expo-audio');
+          const silenceUrl = 'https://raw.githubusercontent.com/anars/blank-audio/master/250-milliseconds-of-silence.mp3';
+          console.log('Starting silent loop for background play keep-alive:', silenceUrl);
+          
+          const p = createAudioPlayer(silenceUrl, {
+            updateInterval: 1000,
+          });
+          p.volume = 0.0;
+          p.loop = true;
+          playerRef.current = p;
+
+          // Lock screen controls
+          if (typeof p.setActiveForLockScreen === 'function') {
+            p.setActiveForLockScreen(true, {
+              title: song.title,
+              artist: song.artist,
+              albumTitle: 'Melo',
+              artworkUrl: song.coverUrl || 'https://images.unsplash.com/photo-1614149162883-504ce4d13909?w=192&h=192&fit=crop'
+            }, {
+              showSeekForward: true,
+              showSeekBackward: true
+            });
+          }
+
+          if (shouldPlay) {
+            p.play();
+          }
+        } catch (err) {
+          console.error('Error starting silent background loop:', err);
+        }
+      }
+
       return;
     }
 
@@ -382,9 +432,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           playbackSubscriptionRef.current = null;
         }
         playerRef.current.pause();
-        playerRef.current.release();
+        playerRef.current.remove();
       } catch (e) {
-        console.log('Error releasing player:', e);
+        console.log('Error removing player:', e);
       }
       playerRef.current = null;
     }

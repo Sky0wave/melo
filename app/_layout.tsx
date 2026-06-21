@@ -47,7 +47,7 @@ function AppContent() {
       </Stack>
       {user && <AudioPlayer />}
       {Platform.OS !== 'web' && WebView && (
-        <View style={{ position: 'absolute', width: 1, height: 1, bottom: -100, left: -100, opacity: 0, overflow: 'hidden' }}>
+        <View style={{ position: 'absolute', width: 1, height: 1, bottom: 0, right: 0, opacity: 0.01, pointerEvents: 'none', overflow: 'hidden' }}>
           <WebView
             ref={registerWebView}
             style={{ width: 1, height: 1 }}

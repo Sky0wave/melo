@@ -170,7 +170,10 @@ export default function HomeScreen() {
 
   // Fetch home feed data
   const loadHomeData = useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       const allSongs = await dbService.getSongs();

@@ -25,7 +25,7 @@ try {
 
 const DEV_SUITE_URL = `http://${devHost}:4000`;
 const METRO_URL = `http://${devHost}:8081`;
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || `http://${devHost}:3000`;
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://melo-black.vercel.app';
 
 interface ServiceStatus {
   name: string;
