@@ -1,0 +1,4 @@
+{
+  "buildCommand": "echo 'Skipping Vercel deployment for mobile branch' && exit 0",
+  "installCommand": "echo 'Skipping install' && exit 0"
+}
