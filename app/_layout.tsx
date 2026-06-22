@@ -3,11 +3,18 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, View, Text, StyleSheet, Platform } from 'react-native';
 import 'react-native-reanimated';
+import * as WebBrowser from 'expo-web-browser';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { AuthProvider, useAuth } from '@/context/auth-context';
 import { PlayerProvider, usePlayer } from '@/context/player-context';
 import { AudioPlayer } from '@/components/audio-player';
+
+// Handle OAuth redirects back to the app
+if (Platform.OS !== 'web') {
+  WebBrowser.maybeCompleteAuthSession();
+}
+
 
 let WebView: any = null;
 if (Platform.OS !== 'web') {

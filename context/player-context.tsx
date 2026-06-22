@@ -330,6 +330,18 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
       isAudioInitializedRef.current = true;
       console.log('expo-audio successfully configured.');
+
+      // Request notification permissions for Android 13+
+      const { PermissionsAndroid } = require('react-native');
+      if (Platform.OS === 'android' && Platform.Version >= 33) {
+        PermissionsAndroid.request('android.permission.POST_NOTIFICATIONS')
+          .then((status: string) => {
+            console.log('POST_NOTIFICATIONS status:', status);
+          })
+          .catch((err: any) => {
+            console.warn('Failed to request POST_NOTIFICATIONS permission:', err);
+          });
+      }
     } catch (error) {
       console.log('expo-audio not available. Falling back to simulated playback.', error);
     }

@@ -2,6 +2,8 @@ import React, { createContext, useState, useEffect, useContext } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase, isSupabaseConfigured } from '@/services/supabase-client';
 import { dbService, DbUser } from '@/services/db';
+import * as WebBrowser from 'expo-web-browser';
+import * as Linking from 'expo-linking';
 
 interface AuthContextType {
   user: DbUser | null;
@@ -9,8 +11,10 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (name: string, email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
+  signInWithGoogle: () => Promise<{ error: string | null }>;
   isMock: boolean;
 }
+
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -126,6 +130,55 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  // Sign In with Google Action
+  const signInWithGoogle = async (): Promise<{ error: string | null }> => {
+    try {
+      setLoading(true);
+      const authUrl = 'https://melo-black.vercel.app/mobile-login.html';
+      const redirectUrl = Linking.createURL('auth');
+      
+      console.log('Initiating Google sign-in auth session with URL:', authUrl);
+      console.log('Linking redirect URL:', redirectUrl);
+      
+      const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUrl);
+      
+      console.log('Auth session result:', result);
+      
+      if (result.type === 'success' && result.url) {
+        const urlObj = Linking.parse(result.url);
+        console.log('Parsed redirect URL object:', urlObj);
+        
+        const userJson = urlObj.queryParams?.user;
+        if (userJson) {
+          const userData = JSON.parse(decodeURIComponent(userJson as string));
+          console.log('Authenticated Google user data:', userData);
+          
+          const dbUser: DbUser = {
+            id: String(userData.id || userData.google_id || 'google_user'),
+            name: userData.name || userData.email.split('@')[0],
+            email: userData.email,
+            image_url: userData.picture || null,
+            role: userData.role || 'user',
+            created_at: userData.created_at || new Date().toISOString(),
+          };
+          
+          await AsyncStorage.setItem('mock_current_user', JSON.stringify(dbUser));
+          setUser(dbUser);
+          return { error: null };
+        } else {
+          return { error: 'Failed to retrieve user info from redirect' };
+        }
+      } else {
+        return { error: result.type === 'cancel' ? 'Sign-in cancelled' : 'Authentication failed' };
+      }
+    } catch (err: any) {
+      console.error('Error during Google sign-in:', err);
+      return { error: err.message || 'An error occurred during Google sign-in' };
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Sign Out Action
   const signOut = async () => {
     setLoading(true);
@@ -139,7 +192,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut, isMock: !isSupabaseConfigured }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut, signInWithGoogle, isMock: !isSupabaseConfigured }}>
       {children}
     </AuthContext.Provider>
   );
