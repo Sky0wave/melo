@@ -524,6 +524,7 @@ export default function App() {
   const followingTargetRef = useRef<string | null>(null);
   const presetSongsRef = useRef<Song[]>([]);
   const selfSyncUpdateTimer = useRef<any>(null);
+  const lastSyncedStateRef = useRef<{ songId: string | null; isPlaying: boolean; progress: number } | null>(null);
 
   useEffect(() => {
     followingTargetRef.current = followingTarget;
@@ -577,6 +578,27 @@ export default function App() {
     return () => clearInterval(interval);
   }, [isPlaying, currentSong, musicQueue, queueIndex]);
 
+  const broadcastJamPlaybackUpdate = (song: Song | null, playing: boolean, secs: number) => {
+    if (!jamRoomRef.current) return;
+    lastSyncedStateRef.current = {
+      songId: song ? song.id : null,
+      isPlaying: playing,
+      progress: secs
+    };
+    fetch(`/api/jams/${jamRoomRef.current.room_id}/update`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        currentSongId: song ? song.id : null,
+        isPlaying: playing,
+        progress: secs,
+        songTitle: song ? song.title : undefined,
+        songArtist: song ? song.artist : undefined,
+        songCoverUrl: song ? song.coverUrl : undefined
+      })
+    }).catch(err => console.warn("[Jam Sync] Broadcast failed:", err));
+  };
+
   // Server state updater (submits play position to backend for other viewers)
   useEffect(() => {
     if (selfSyncUpdateTimer.current) {
@@ -600,18 +622,25 @@ export default function App() {
       }).catch(err => console.warn("Broadcasting play position to server failed:", err));
 
       if (jamRoom && jamRoom.isHost) {
-        fetch(`/api/jams/${jamRoom.room_id}/update`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            currentSongId: currentSong ? currentSong.id : null,
-            isPlaying,
-            progress,
-            songTitle: currentSong ? currentSong.title : undefined,
-            songArtist: currentSong ? currentSong.artist : undefined,
-            songCoverUrl: currentSong ? currentSong.coverUrl : undefined
-          })
-        }).catch(err => console.warn("Broadcasting to Jam Room failed:", err));
+        const isAlreadySynced = lastSyncedStateRef.current &&
+          lastSyncedStateRef.current.songId === (currentSong ? currentSong.id : null) &&
+          lastSyncedStateRef.current.isPlaying === isPlaying &&
+          Math.abs(lastSyncedStateRef.current.progress - progress) <= 2;
+
+        if (!isAlreadySynced) {
+          fetch(`/api/jams/${jamRoom.room_id}/update`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              currentSongId: currentSong ? currentSong.id : null,
+              isPlaying,
+              progress,
+              songTitle: currentSong ? currentSong.title : undefined,
+              songArtist: currentSong ? currentSong.artist : undefined,
+              songCoverUrl: currentSong ? currentSong.coverUrl : undefined
+            })
+          }).catch(err => console.warn("Broadcasting to Jam Room failed:", err));
+        }
       }
     }, 1000);
 

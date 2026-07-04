@@ -65,6 +65,7 @@ export function SearchEngine({
   const [recentSearches, setRecentSearches] = useState<HistoryItem[]>([]);
   const [showPlaylistMenuId, setShowPlaylistMenuId] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState("");
+  const [didYouMean, setDidYouMean] = useState("");
 
   const fetchSearchHistory = async () => {
     if (!userId) {
@@ -104,6 +105,7 @@ export function SearchEngine({
     setSource("none");
     setStatusMsg("Checking library cache…");
     setResults([]);
+    setDidYouMean("");
 
     // Save search query to database or localStorage
     if (userId) {
@@ -137,6 +139,7 @@ export function SearchEngine({
       const src: SearchSource = data.source || "none";
       setSource(src);
       setResults(data.results || []);
+      setDidYouMean(data.didYouMean || "");
 
       if (src === "database") {
         setStatusMsg(`Found in cache — instant result`);
@@ -165,6 +168,7 @@ export function SearchEngine({
     setSearched(false);
     setSource("none");
     setStatusMsg("");
+    setDidYouMean("");
   };
 
   const handleDeleteHistoryItem = async (id: number) => {
@@ -264,6 +268,33 @@ export function SearchEngine({
                 </span>
               )}
               <span className="text-[10px] text-white/40 font-sans">{statusMsg}</span>
+            </div>
+          )}
+
+          {/* Did you mean suggestion */}
+          {didYouMean && !loading && (
+            <div className="bg-[#FF007A]/10 border border-[#FF007A]/25 rounded-xl p-3 flex items-center justify-between -mt-2">
+              <p className="text-xs text-white/90 font-sans">
+                Did you mean:{" "}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuery(didYouMean);
+                    runSearch(didYouMean);
+                  }}
+                  className="font-bold text-[#FF007A] hover:underline bg-transparent border-none p-0 cursor-pointer inline-block"
+                >
+                  {didYouMean}
+                </button>
+                ?
+              </p>
+              <button
+                type="button"
+                onClick={() => setDidYouMean("")}
+                className="text-white/40 hover:text-white text-[10px] font-sans font-bold cursor-pointer"
+              >
+                Dismiss
+              </button>
             </div>
           )}
 

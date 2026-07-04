@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Melo Mobile Login</title>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #07060a;
+      color: #ecedee;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      box-sizing: border-box;
+    }
+    .container {
+      width: 90%;
+      max-width: 400px;
+      text-align: center;
+      padding: 40px 24px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 24px;
+      backdrop-filter: blur(20px);
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+    }
+    .logo-container {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      background: rgba(255, 0, 122, 0.1);
+      border: 1px solid rgba(255, 0, 122, 0.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 24px auto;
+    }
+    .logo-container svg {
+      width: 32px;
+      height: 32px;
+      fill: #FF007A;
+    }
+    h1 {
+      font-size: 28px;
+      font-weight: 800;
+      margin: 0 0 8px 0;
+      letter-spacing: -0.5px;
+      background: linear-gradient(135deg, #fff 0%, #a5a5a5 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    p {
+      color: #9ba1a6;
+      font-size: 14px;
+      line-height: 1.5;
+      margin: 0 0 32px 0;
+    }
+    .btn-container {
+      display: flex;
+      justify-content: center;
+      min-height: 44px;
+      margin-bottom: 24px;
+    }
+    .status {
+      font-size: 13px;
+      color: #FF007A;
+      margin-top: 16px;
+      min-height: 20px;
+    }
+    .manual-link {
+      display: none;
+      margin-top: 24px;
+      font-size: 13px;
+      color: #9ba1a6;
+    }
+    .manual-link a {
+      color: #FF007A;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .manual-link a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo-container">
+      <!-- Music Note Icon SVG -->
+      <svg viewBox="0 0 24 24">
+        <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+      </svg>
+    </div>
+    <h1>Melo</h1>
+    <p>Your personal soundtrack, refined.<br>Sign in to sync with the mobile app.</p>
+    
+    <div class="btn-container">
+      <div id="g_id_onload"
+           data-client_id="950921906220-dt0pscki7erf5j27ahdqj33q01qnlbiv.apps.googleusercontent.com"
+           data-context="signin"
+           data-ux_mode="popup"
+           data-callback="handleCredentialResponse"
+           data-auto_select="false"
+           data-itp_support="true">
+      </div>
+      <div class="g_id_signin"
+           data-type="standard"
+           data-shape="pill"
+           data-theme="filled_dark"
+           data-text="signin_with"
+           data-size="large"
+           data-logo_alignment="left">
+      </div>
+    </div>
+
+    <div id="status" class="status"></div>
+    <div id="manual-link" class="manual-link">
+      If you are not redirected automatically, <a id="redirect-href" href="#">click here to return to the app</a>.
+    </div>
+  </div>
+
+  <script>
+    function setStatus(text) {
+      document.getElementById('status').innerText = text;
+    }
+
+    async function handleCredentialResponse(response) {
+      setStatus("Authenticating with Melo...");
+      try {
+        const res = await fetch("/api/auth/google", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ credential: response.credential })
+        });
+
+        if (!res.ok) {
+          const errorData = await res.json();
+          throw new Error(errorData.error || "Google authentication failed.");
+        }
+
+        const data = await res.json();
+        if (data.success && data.user) {
+          setStatus("Success! Redirecting back to the app...");
+          const userStr = encodeURIComponent(JSON.stringify(data.user));
+          const redirectUrl = `melomobile://auth?user=${userStr}`;
+          
+          document.getElementById('redirect-href').href = redirectUrl;
+          document.getElementById('manual-link').style.display = 'block';
+          
+          // Attempt redirect
+          window.location.href = redirectUrl;
+          
+          // Fallback timer
+          setTimeout(() => {
+            window.location.replace(redirectUrl);
+          }, 1000);
+        } else {
+          throw new Error("Invalid response from server.");
+        }
+      } catch (err) {
+        console.error("Auth error:", err);
+        setStatus("Authentication failed: " + err.message);
+      }
+    }
+  </script>
+</body>
+</html>

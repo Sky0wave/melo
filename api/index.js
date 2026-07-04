@@ -3198,6 +3198,7 @@ var fallback_songs_default = [
 import dotenv from "dotenv";
 import pg from "pg";
 import * as cheerio from "cheerio";
+import play from "play-dl";
 dotenv.config();
 var pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
@@ -3903,6 +3904,18 @@ app.get("/api/jams/:roomId", async (req, res) => {
     res.status(500).json({ error: "Failed to load Jam Room", message: err.message });
   }
 });
+app.delete("/api/jams/:roomId", async (req, res) => {
+  const { roomId } = req.params;
+  try {
+    await pool.query("DELETE FROM jams WHERE room_id = $1", [roomId]);
+    await pool.query("DELETE FROM jam_messages WHERE room_id = $1", [roomId]);
+    broadcastUpdate("JAM_DELETE", { room_id: roomId });
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[Jam Room] Delete failed:", err.message);
+    res.status(500).json({ error: "Failed to delete Jam Room", message: err.message });
+  }
+});
 app.get("/api/jams/:roomId/messages", async (req, res) => {
   const { roomId } = req.params;
   try {
@@ -4338,6 +4351,28 @@ app.get("/api/youtube/video/:videoId", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch video details" });
   }
 });
+app.get("/api/stream/:videoId", async (req, res) => {
+  const { videoId } = req.params;
+  if (!videoId) {
+    return res.status(400).json({ error: "videoId is required" });
+  }
+  try {
+    const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    console.log(`[Stream API] Resolving audio stream for YouTube Video ID: ${videoId}`);
+    const stream = await play.stream(videoUrl, {
+      quality: 0
+    });
+    if (stream && stream.url) {
+      console.log(`[Stream API] Successfully resolved stream URL. Redirecting client...`);
+      return res.redirect(stream.url);
+    } else {
+      throw new Error("No stream URL returned from play-dl");
+    }
+  } catch (error) {
+    console.error("[Stream API] Failed to resolve stream:", error);
+    res.status(500).json({ error: "Failed to resolve stream: " + error.message });
+  }
+});
 function parseISO8601Duration(iso) {
   const match = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
   if (!match) return 0;
@@ -4442,10 +4477,10 @@ You must respond ONLY in a clean JSON format matching this schema:
 });
 app.post("/api/auth/guest", async (req, res) => {
   try {
-    const email = "guest@melo.audio";
-    const name = "Guest Listener";
-    const googleId = "guest_id";
-    const picture = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150";
+    const email = req.body.email || "guest@melo.audio";
+    const name = req.body.name || "Guest Listener";
+    const googleId = req.body.googleId || (req.body.email ? `guest_${req.body.email.replace(/[^a-zA-Z0-9]/g, "_")}` : "guest_id");
+    const picture = req.body.picture || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150";
     let user;
     let dbSuccess = false;
     for (let attempt = 1; attempt <= 3; attempt++) {
