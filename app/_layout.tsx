@@ -10,10 +10,10 @@ import { AuthProvider, useAuth } from '@/context/auth-context';
 import { PlayerProvider, usePlayer } from '@/context/player-context';
 import { AudioPlayer } from '@/components/audio-player';
 
-// Handle OAuth redirects back to the app
 if (Platform.OS !== 'web') {
   WebBrowser.maybeCompleteAuthSession();
 }
+
 
 
 let WebView: any = null;

@@ -14,7 +14,8 @@
         "UIBackgroundModes": [
           "audio"
         ]
-      }
+      },
+      "bundleIdentifier": "com.skywave01.MeloMobile"
     },
     "android": {
       "adaptiveIcon": {
@@ -51,12 +52,6 @@
           "dark": {
             "backgroundColor": "#000000"
           }
-        }
-      ],
-      [
-        "expo-audio",
-        {
-          "enableBackgroundPlayback": true
         }
       ],
       "expo-asset"

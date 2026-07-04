@@ -5,11 +5,25 @@ import { isSupabaseConfigured } from '@/services/supabase-client';
 import { Platform, View } from 'react-native';
 
 let WebView: any = null;
+let TrackPlayer: any = null;
+let State: any = null;
+let Event: any = null;
+let Capability: any = null;
+
 if (Platform.OS !== 'web') {
   try {
     WebView = require('react-native-webview').WebView;
   } catch (e) {
     console.error('Failed to import react-native-webview:', e);
+  }
+  try {
+    const trackPlayerMod = require('react-native-track-player');
+    TrackPlayer = trackPlayerMod.default || trackPlayerMod;
+    State = trackPlayerMod.State;
+    Event = trackPlayerMod.Event;
+    Capability = trackPlayerMod.Capability;
+  } catch (e) {
+    console.error('Failed to import react-native-track-player:', e);
   }
 }
 
@@ -315,39 +329,106 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }
   }, [isPlaying]);
 
-  // Initialize expo-audio
+  // Initialize react-native-track-player
   useEffect(() => {
-    if (Platform.OS === 'web') return; // Skip expo-audio on Web to avoid errors
-    try {
-      const { setAudioModeAsync } = require('expo-audio');
-      
-      setAudioModeAsync({
-        playsInSilentMode: true,
-        shouldPlayInBackground: true,
-        interruptionMode: 'doNotMix',
-        interruptionModeAndroid: 'doNotMix'
-      }).catch((err: any) => console.log('Audio mode config not available on this platform:', err));
-
-      isAudioInitializedRef.current = true;
-      console.log('expo-audio successfully configured.');
-
-      // Request notification permissions for Android 13+
-      const { PermissionsAndroid } = require('react-native');
-      if (Platform.OS === 'android' && Platform.Version >= 33) {
-        PermissionsAndroid.request('android.permission.POST_NOTIFICATIONS')
-          .then((status: string) => {
-            console.log('POST_NOTIFICATIONS status:', status);
-          })
-          .catch((err: any) => {
-            console.warn('Failed to request POST_NOTIFICATIONS permission:', err);
-          });
+    if (Platform.OS === 'web') return;
+    
+    let isMounted = true;
+    const initPlayer = async () => {
+      try {
+        if (!TrackPlayer) {
+          console.warn('TrackPlayer module not loaded yet.');
+          return;
+        }
+        await TrackPlayer.setupPlayer({
+          autoHandleInterruptions: true,
+        });
+        await TrackPlayer.updateOptions({
+          capabilities: [
+            Capability.Play,
+            Capability.Pause,
+            Capability.SkipToNext,
+            Capability.SkipToPrevious,
+            Capability.SeekTo,
+          ],
+          compactCapabilities: [
+            Capability.Play,
+            Capability.Pause,
+            Capability.SkipToNext,
+          ],
+        });
+        if (isMounted) {
+          isAudioInitializedRef.current = true;
+          console.log('react-native-track-player successfully configured.');
+        }
+      } catch (err) {
+        console.log('TrackPlayer setup error or already initialized:', err);
+        if (isMounted) {
+          isAudioInitializedRef.current = true;
+        }
       }
-    } catch (error) {
-      console.log('expo-audio not available. Falling back to simulated playback.', error);
+    };
+
+    initPlayer();
+
+    // Request notification permissions for Android 13+
+    if (Platform.OS === 'android' && Platform.Version >= 33) {
+      const { PermissionsAndroid } = require('react-native');
+      PermissionsAndroid.request('android.permission.POST_NOTIFICATIONS')
+        .then((status: string) => {
+          console.log('POST_NOTIFICATIONS status:', status);
+        })
+        .catch((err: any) => {
+          console.warn('Failed to request POST_NOTIFICATIONS permission:', err);
+        });
     }
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  const loadSong = (song: Song, shouldPlay: boolean) => {
+  // Poll TrackPlayer progress and playback state
+  useEffect(() => {
+    if (Platform.OS === 'web' || !isAudioInitializedRef.current || !TrackPlayer) return;
+
+    const interval = setInterval(async () => {
+      try {
+        if (currentSong && !isYoutubeTrack(currentSong)) {
+          const state = await TrackPlayer.getPlaybackState();
+          const isCurrentPlaying = state.state === State.Playing || state.state === 'playing';
+          setIsPlaying(isCurrentPlaying);
+
+          const trackProgress = await TrackPlayer.getProgress();
+          setProgress(Math.floor(trackProgress.position));
+          if (trackProgress.duration && trackProgress.duration > 0) {
+            setDuration(Math.floor(trackProgress.duration));
+          }
+        }
+      } catch (err) {
+        // Ignore transition errors
+      }
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [currentSong, isAudioInitializedRef.current]);
+
+  // Handle TrackPlayer queue ended event
+  useEffect(() => {
+    if (Platform.OS === 'web' || !isAudioInitializedRef.current || !TrackPlayer) return;
+
+    const sub = TrackPlayer.addEventListener(Event.PlaybackQueueEnded, () => {
+      if (currentSong && !isYoutubeTrack(currentSong)) {
+        nextSongRef.current();
+      }
+    });
+
+    return () => {
+      sub.remove();
+    };
+  }, [currentSong, isAudioInitializedRef.current]);
+
+  const loadSong = async (song: Song, shouldPlay: boolean) => {
     if (Platform.OS === 'web') {
       if (html5AudioRef.current) {
         html5AudioRef.current.src = getAudioSourceForSong(song);
@@ -363,18 +444,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (isYoutubeTrack(song)) {
-      if (playerRef.current) {
+      if (isAudioInitializedRef.current && TrackPlayer) {
         try {
-          if (playbackSubscriptionRef.current) {
-            playbackSubscriptionRef.current.remove();
-            playbackSubscriptionRef.current = null;
-          }
-          playerRef.current.pause();
-          playerRef.current.remove();
+          await TrackPlayer.reset();
         } catch (e) {
-          console.log('Error removing player:', e);
+          console.log('Error resetting TrackPlayer:', e);
         }
-        playerRef.current = null;
       }
 
       let videoId = '';
@@ -395,38 +470,29 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         sendToWebView('load', { videoId, autoplay: shouldPlay, startTime: progress });
       }
 
-      // Keep background audio thread active by playing a silent loop via expo-audio
-      if (isAudioInitializedRef.current) {
+      // Keep the foreground service alive with a long silent audio file
+      // so Android does not kill the process when the YouTube WebView plays
+      if (isAudioInitializedRef.current && TrackPlayer) {
         try {
-          const { createAudioPlayer } = require('expo-audio');
-          const silenceUrl = 'https://raw.githubusercontent.com/anars/blank-audio/master/250-milliseconds-of-silence.mp3';
-          console.log('Starting silent loop for background play keep-alive:', silenceUrl);
-          
-          const p = createAudioPlayer(silenceUrl, {
-            updateInterval: 1000,
-          });
-          p.volume = 0.0;
-          p.loop = true;
-          playerRef.current = p;
+          // 1-hour silent MP3 — keeps the foreground media service active
+          // without spamming events the way a 250ms loop would
+          const silenceUrl = 'https://raw.githubusercontent.com/anars/blank-audio/master/1-hour-of-silence.mp3';
+          console.log('[TrackPlayer] Starting long-silence background keep-alive');
 
-          // Lock screen controls
-          if (typeof p.setActiveForLockScreen === 'function') {
-            p.setActiveForLockScreen(true, {
-              title: song.title,
-              artist: song.artist,
-              albumTitle: 'Melo',
-              artworkUrl: song.coverUrl || 'https://images.unsplash.com/photo-1614149162883-504ce4d13909?w=192&h=192&fit=crop'
-            }, {
-              showSeekForward: true,
-              showSeekBackward: true
-            });
-          }
+          await TrackPlayer.add({
+            id: 'silence',
+            url: silenceUrl,
+            title: song.title,
+            artist: song.artist,
+            artwork: song.coverUrl || 'https://images.unsplash.com/photo-1614149162883-504ce4d13909?w=300',
+            duration: 3600,
+          });
 
           if (shouldPlay) {
-            p.play();
+            await TrackPlayer.play();
           }
         } catch (err) {
-          console.error('Error starting silent background loop:', err);
+          console.error('[TrackPlayer] Error starting background silence keep-alive:', err);
         }
       }
 
@@ -435,74 +501,33 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     sendToWebView('pause');
 
-    if (!isAudioInitializedRef.current) return;
-
-    if (playerRef.current) {
-      try {
-        if (playbackSubscriptionRef.current) {
-          playbackSubscriptionRef.current.remove();
-          playbackSubscriptionRef.current = null;
-        }
-        playerRef.current.pause();
-        playerRef.current.remove();
-      } catch (e) {
-        console.log('Error removing player:', e);
-      }
-      playerRef.current = null;
-    }
+    if (!isAudioInitializedRef.current || !TrackPlayer) return;
 
     try {
-      const { createAudioPlayer } = require('expo-audio');
       const audioUrl = getAudioSourceForSong(song);
-      console.log('Creating audio player for URL:', audioUrl);
+      console.log('Creating TrackPlayer for URL:', audioUrl);
       
-      const p = createAudioPlayer(audioUrl, {
-        updateInterval: 500,
+      await TrackPlayer.reset();
+      await TrackPlayer.add({
+        id: song.id,
+        url: audioUrl,
+        title: song.title,
+        artist: song.artist,
+        artwork: song.coverUrl || 'https://images.unsplash.com/photo-1614149162883-504ce4d13909?w=300',
       });
-      playerRef.current = p;
-
-      const sub = p.addListener('playbackStatusUpdate', (status: any) => {
-        console.log('Playback status update:', {
-          playing: status.playing,
-          currentTime: status.currentTime,
-          duration: status.duration,
-          loading: status.loading,
-          error: status.error
-        });
-        setProgress(status.currentTime || 0);
-        if (status.duration && status.duration > 0) {
-          setDuration(status.duration);
-        }
-        setIsPlaying(status.playing);
-
-        if (status.didJustFinish) {
-          nextSongRef.current();
-        }
-      });
-      playbackSubscriptionRef.current = sub;
 
       if (shouldPlay) {
-        p.play();
+        await TrackPlayer.play();
+        setIsPlaying(true);
       } else {
-        p.pause();
-      }
-
-      // Lock screen controls
-      if (typeof p.setActiveForLockScreen === 'function') {
-        p.setActiveForLockScreen(true, {
-          title: song.title,
-          artist: song.artist,
-          albumTitle: 'Melo',
-          artworkUrl: 'https://images.unsplash.com/photo-1614149162883-504ce4d13909?w=192&h=192&fit=crop'
-        }, {
-          showSeekForward: true,
-          showSeekBackward: true
-        });
+        await TrackPlayer.pause();
+        setIsPlaying(false);
       }
     } catch (err) {
-      console.error('Error instantiating player:', err);
+      console.error('Error instantiating TrackPlayer:', err);
     }
   };
+
 
   // Clear player state when user logs out or switches accounts, and load last played song
   useEffect(() => {
@@ -547,8 +572,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setQueue([]);
       setIsExpanded(false);
       setJamRoom(null);
-      if (isAudioInitializedRef.current && playerRef.current) {
-        playerRef.current.pause();
+      if (isAudioInitializedRef.current && TrackPlayer) {
+        TrackPlayer.pause().catch(() => {});
       }
     }
   }, [user?.id]);
@@ -632,8 +657,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
               }
             } else {
               setCurrentSong(null);
-              if (isAudioInitializedRef.current && playerRef.current) {
-                playerRef.current.pause();
+              if (isAudioInitializedRef.current && TrackPlayer) {
+                TrackPlayer.pause().catch(() => {});
               } else if (Platform.OS === 'web' && html5AudioRef.current) {
                 html5AudioRef.current.pause();
               }
@@ -643,11 +668,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             setIsPlaying(updatedJam.current_song_is_playing);
             if (isYoutubeTrack(currentSong)) {
               sendToWebView(updatedJam.current_song_is_playing ? 'play' : 'pause');
-            } else if (isAudioInitializedRef.current && playerRef.current) {
+            } else if (isAudioInitializedRef.current && TrackPlayer) {
               if (updatedJam.current_song_is_playing) {
-                playerRef.current.play();
+                TrackPlayer.play().catch(() => {});
               } else {
-                playerRef.current.pause();
+                TrackPlayer.pause().catch(() => {});
               }
             } else if (Platform.OS === 'web' && html5AudioRef.current) {
               if (updatedJam.current_song_is_playing) {
@@ -663,8 +688,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
               if (drift > 3) {
                 if (isYoutubeTrack(currentSong)) {
                   sendToWebView('seek', { time: updatedJam.current_song_progress });
-                } else if (isAudioInitializedRef.current && playerRef.current) {
-                  playerRef.current.seekTo(updatedJam.current_song_progress);
+                } else if (isAudioInitializedRef.current && TrackPlayer) {
+                  TrackPlayer.seekTo(updatedJam.current_song_progress).catch(() => {});
                 } else if (Platform.OS === 'web' && html5AudioRef.current) {
                   html5AudioRef.current.currentTime = updatedJam.current_song_progress;
                 }
@@ -720,8 +745,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             }
           } else {
             setCurrentSong(null);
-            if (isAudioInitializedRef.current && playerRef.current) {
-              playerRef.current.pause();
+            if (isAudioInitializedRef.current && TrackPlayer) {
+              TrackPlayer.pause().catch(() => {});
             } else if (Platform.OS === 'web' && html5AudioRef.current) {
               html5AudioRef.current.pause();
             }
@@ -731,11 +756,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           setIsPlaying(jam.current_song_is_playing);
           if (isYoutubeTrack(currentSong)) {
             sendToWebView(jam.current_song_is_playing ? 'play' : 'pause');
-          } else if (isAudioInitializedRef.current && playerRef.current) {
+          } else if (isAudioInitializedRef.current && TrackPlayer) {
             if (jam.current_song_is_playing) {
-              playerRef.current.play();
+              TrackPlayer.play().catch(() => {});
             } else {
-              playerRef.current.pause();
+              TrackPlayer.pause().catch(() => {});
             }
           } else if (Platform.OS === 'web' && html5AudioRef.current) {
             if (jam.current_song_is_playing) {
@@ -751,8 +776,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             if (drift > 3) {
               if (isYoutubeTrack(currentSong)) {
                 sendToWebView('seek', { time: jam.current_song_progress });
-              } else if (isAudioInitializedRef.current && playerRef.current) {
-                playerRef.current.seekTo(jam.current_song_progress);
+              } else if (isAudioInitializedRef.current && TrackPlayer) {
+                TrackPlayer.seekTo(jam.current_song_progress).catch(() => {});
               } else if (Platform.OS === 'web' && html5AudioRef.current) {
                 html5AudioRef.current.currentTime = jam.current_song_progress;
               }
@@ -928,12 +953,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     setIsPlaying(false);
     if (isYoutubeTrack(currentSong)) {
       sendToWebView('pause');
-    } else if (isAudioInitializedRef.current && playerRef.current) {
-      try {
-        playerRef.current.pause();
-      } catch (err) {
-        console.error('Error pausing song with expo-audio:', err);
-      }
+    } else if (isAudioInitializedRef.current && TrackPlayer) {
+      TrackPlayer.pause().catch((err: any) => console.log('TrackPlayer pause error:', err));
     } else if (Platform.OS === 'web' && html5AudioRef.current) {
       html5AudioRef.current.pause();
     }
@@ -952,16 +973,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setIsPlaying(true);
       if (isYoutubeTrack(currentSong)) {
         sendToWebView('play');
-      } else if (isAudioInitializedRef.current) {
-        if (playerRef.current) {
-          try {
-            playerRef.current.play();
-          } catch (err) {
-            console.error('Error resuming song with expo-audio:', err);
-          }
-        } else {
-          loadSong(currentSong, true);
-        }
+      } else if (isAudioInitializedRef.current && TrackPlayer) {
+        TrackPlayer.play().catch((err: any) => console.log('TrackPlayer play error:', err));
       } else if (Platform.OS === 'web' && html5AudioRef.current) {
         html5AudioRef.current.play().catch((err: any) => console.log('Resume playback failed:', err));
       }
@@ -1003,12 +1016,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setProgress(seconds);
       if (isYoutubeTrack(currentSong)) {
         sendToWebView('seek', { time: seconds });
-      } else if (isAudioInitializedRef.current && playerRef.current) {
-        try {
-          playerRef.current.seekTo(seconds);
-        } catch (err) {
-          console.error('Error seeking song with expo-audio:', err);
-        }
+      } else if (isAudioInitializedRef.current && TrackPlayer) {
+        TrackPlayer.seekTo(seconds).catch((err: any) => console.log('TrackPlayer seek error:', err));
       } else if (Platform.OS === 'web' && html5AudioRef.current) {
         html5AudioRef.current.currentTime = seconds;
       }
