@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Home, Search, Library, Music, User, Pause, Play, Compass, HardDrive, ArrowRight, HelpCircle } from "lucide-react";
 import { Song, Playlist, ListeningHabit } from "./types";
 import { AudioEngine } from "./components/AudioEngine";
@@ -14,6 +14,8 @@ import { QueuePanel } from "./components/QueuePanel";
 import { Equalizer } from "./components/Equalizer";
 import { Notifications, NotificationItem } from "./components/Notifications";
 import { useMediaSession } from "./hooks/useMediaSession";
+import { MusicPlaybackEngine } from "./engine/MusicPlaybackEngine";
+import { AmbientLayers } from "./components/AmbientLayers";
 
 // const PRESET_SONGS: Song[] = [
 //   {
@@ -250,6 +252,8 @@ function JamRoomForms({
     </div>
   );
 }
+
+const playbackEngine = new MusicPlaybackEngine();
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("home");
@@ -578,10 +582,69 @@ export default function App() {
           setSongs(data);
           setMusicQueue(data);
           setCurrentSong(prev => prev || data[0]);
+          playbackEngine.initializeSongs(data);
         }
       })
       .catch(err => console.warn("Failed fetching metadata presets:", err));
   }, []);
+
+  // Synchronize playbackEngine state with App component state
+  useEffect(() => {
+    const handlePlay = (song: Song) => {
+      setCurrentSong(song);
+      setIsPlaying(true);
+    };
+    const handlePause = () => {
+      setIsPlaying(false);
+    };
+    const handleResume = () => {
+      setIsPlaying(true);
+    };
+    const handleStop = () => {
+      setIsPlaying(false);
+      setCurrentSong(null);
+      setProgress(0);
+    };
+    const handleProgress = (prog: number) => {
+      setProgress(prog);
+    };
+    const handleQueueChanged = (q: Song[]) => {
+      setMusicQueue(q);
+      const cur = playbackEngine.getCurrentSong();
+      if (cur) {
+        const idx = q.findIndex(s => s.id === cur.id);
+        setQueueIndex(idx !== -1 ? idx : 0);
+      }
+    };
+
+    playbackEngine.on("play", handlePlay);
+    playbackEngine.on("pause", handlePause);
+    playbackEngine.on("resume", handleResume);
+    playbackEngine.on("stop", handleStop);
+    playbackEngine.on("progress", handleProgress);
+    playbackEngine.on("queue-changed", handleQueueChanged);
+
+    // Initial sync of EQ
+    playbackEngine.setEqBands(eqBands);
+
+    return () => {
+      playbackEngine.off("play", handlePlay);
+      playbackEngine.off("pause", handlePause);
+      playbackEngine.off("resume", handleResume);
+      playbackEngine.off("stop", handleStop);
+      playbackEngine.off("progress", handleProgress);
+      playbackEngine.off("queue-changed", handleQueueChanged);
+    };
+  }, []);
+
+  // Sync shuffle & loop modes
+  useEffect(() => {
+    playbackEngine.setShuffle(shuffleOn);
+  }, [shuffleOn]);
+
+  useEffect(() => {
+    playbackEngine.setLoopMode(repeatOn ? "one" : "playlist");
+  }, [repeatOn]);
 
   const handleSetProgress = (secs: number) => {
     setProgress(secs);
@@ -589,29 +652,8 @@ export default function App() {
       setYtSeekTo(secs);
       setTimeout(() => setYtSeekTo(null), 50);
     }
+    playbackEngine.skipTo(secs);
   };
-
-  // Set up progress interval ticker when playing
-  useEffect(() => {
-    let interval: any = null;
-    if (isPlaying && currentSong) {
-      // If playing a YouTube song, let the YouTubePlayer handle progress tracking
-      if (currentSong.id.startsWith("yt_") || currentSong.videoId) {
-        return;
-      }
-      interval = setInterval(() => {
-        setProgress(p => {
-          if (p >= currentSong.durationSeconds - 1) {
-            // Song completed, progress to the next inline or queue item
-            setTimeout(() => onNextSong(), 50);
-            return 0;
-          }
-          return p + 1;
-        });
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [isPlaying, currentSong, musicQueue, queueIndex]);
 
   const broadcastJamPlaybackUpdate = (song: Song | null, playing: boolean, secs: number) => {
     if (!jamRoomRef.current) return;
@@ -841,17 +883,12 @@ export default function App() {
       setFollowingTarget(null);
     }
 
-    setCurrentSong(song);
-    setIsPlaying(true);
-    setProgress(0);
-
     if (contextQueue && contextQueue.length > 0) {
-      setMusicQueue(contextQueue);
-      const idx = contextQueue.findIndex(s => s.id === song.id);
-      setQueueIndex(idx !== -1 ? idx : 0);
+      playbackEngine.playPlaylist(contextQueue);
+      playbackEngine.playSong(song.id);
     } else {
-      setMusicQueue([song]);
-      setQueueIndex(0);
+      playbackEngine.playPlaylist([song]);
+      playbackEngine.playSong(song.id);
     }
 
     addNotification("success", `Now playing: ${song.title}`);
@@ -925,40 +962,16 @@ export default function App() {
   };
 
   const onNextSong = () => {
-    if (musicQueue.length === 0) return;
-    if (repeatOn && currentSong) {
-      setProgress(0);
-      const songCopy = { ...currentSong } as Song;
-      setCurrentSong(songCopy);
-      return;
-    }
-    let nextIdx = 0;
-    if (shuffleOn) {
-      nextIdx = Math.floor(Math.random() * musicQueue.length);
-    } else {
-      nextIdx = (queueIndex + 1) % musicQueue.length;
-    }
-    setQueueIndex(nextIdx);
-    setCurrentSong(musicQueue[nextIdx]);
-    setProgress(0);
+    playbackEngine.next();
   };
 
   const onPreviousSong = () => {
-    if (musicQueue.length === 0) return;
-    let prevIdx = 0;
-    if (shuffleOn) {
-      prevIdx = Math.floor(Math.random() * musicQueue.length);
-    } else {
-      prevIdx = (queueIndex - 1 + musicQueue.length) % musicQueue.length;
-    }
-    setQueueIndex(prevIdx);
-    setCurrentSong(musicQueue[prevIdx]);
-    setProgress(0);
+    playbackEngine.previous();
   };
 
   const handlePlayerError = (errorCode: number) => {
     console.error("YouTube Player Error:", errorCode);
-    setIsPlaying(false);
+    playbackEngine.pause();
 
     let message = "Failed to play this song.";
     if (errorCode === 101 || errorCode === 150) {
@@ -975,8 +988,7 @@ export default function App() {
 
     if (musicQueue.length > 1) {
       setTimeout(() => {
-        onNextSong();
-        setIsPlaying(true);
+        playbackEngine.next();
       }, 1500);
     }
   };
@@ -986,14 +998,27 @@ export default function App() {
     if (followingTarget) {
       setFollowingTarget(null);
     }
-    setIsPlaying(!isPlaying);
+    if (playbackEngine.getActiveMode() !== "none") {
+      if (isPlaying) {
+        playbackEngine.pause();
+      } else {
+        playbackEngine.resume();
+      }
+    } else {
+      if (currentSong) {
+        playbackEngine.playPlaylist(musicQueue);
+        playbackEngine.playSong(currentSong.id);
+      } else if (musicQueue.length > 0) {
+        playbackEngine.playPlaylist(musicQueue);
+      }
+    }
   };
 
   // Connect Media Session API for lock screen controls
   useMediaSession({
     currentSong,
     isPlaying,
-    onTogglePlay: () => setIsPlaying(p => !p),
+    onTogglePlay: handleTogglePlay,
     onNextSong,
     onPreviousSong,
     progress,
@@ -1046,19 +1071,10 @@ export default function App() {
   };
 
   const handleTrackQueueChange = (queue: Song[], startIdx: number, shuffle: boolean) => {
-    let compiledQueue = [...queue];
-    setShuffleOn(shuffle);
-    if (shuffle) {
-      // Fisher-Yates Shuffle
-      for (let i = compiledQueue.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [compiledQueue[i], compiledQueue[j]] = [compiledQueue[j], compiledQueue[i]];
-      }
-    }
-    setMusicQueue(compiledQueue);
-    setQueueIndex(startIdx);
-    if (compiledQueue[startIdx]) {
-      handlePlaySongDirectly(compiledQueue[startIdx]);
+    playbackEngine.setShuffle(shuffle);
+    playbackEngine.playPlaylist(queue);
+    if (queue[startIdx]) {
+      playbackEngine.playSong(queue[startIdx].id);
     }
   };
 
@@ -1268,9 +1284,14 @@ export default function App() {
       if (activeState && activeState.currentSongId) {
         const match = songs.find(s => s.id === activeState.currentSongId);
         if (match) {
-          setCurrentSong(match);
-          setIsPlaying(activeState.isPlaying);
-          setProgress(activeState.progress);
+          playbackEngine.playPlaylist([match]);
+          playbackEngine.playSong(match.id);
+          if (activeState.isPlaying) {
+            playbackEngine.resume();
+          } else {
+            playbackEngine.pause();
+          }
+          playbackEngine.skipTo(activeState.progress);
         }
       }
     }
@@ -1332,9 +1353,14 @@ export default function App() {
       if (data.jam.current_song_id) {
         const matched = songs.find(s => s.id === data.jam.current_song_id);
         if (matched) {
-          setCurrentSong(matched);
-          setIsPlaying(data.jam.current_song_is_playing);
-          setProgress(data.jam.current_song_progress);
+          playbackEngine.playPlaylist([matched]);
+          playbackEngine.playSong(matched.id);
+          if (data.jam.current_song_is_playing) {
+            playbackEngine.resume();
+          } else {
+            playbackEngine.pause();
+          }
+          playbackEngine.skipTo(data.jam.current_song_progress);
         }
       }
       return true;
@@ -1388,41 +1414,35 @@ export default function App() {
     setEqBands(prev => {
       const copy = [...prev];
       copy[idx] = value;
+      playbackEngine.setEqBands(copy);
       return copy;
     });
   };
 
   const handleApplyPreset = (presetGains: number[]) => {
     setEqBands(presetGains);
+    playbackEngine.setEqBands(presetGains);
     addNotification("info", "Applied Equalizer preset");
   };
 
   const handlePlayQueueIndex = (index: number) => {
     if (musicQueue[index]) {
-      setQueueIndex(index);
-      setCurrentSong(musicQueue[index]);
-      setIsPlaying(true);
-      setProgress(0);
+      playbackEngine.playSong(musicQueue[index].id);
       addNotification("success", `Playing from queue: ${musicQueue[index].title}`);
     }
   };
 
   const handleRemoveQueueIndex = (index: number) => {
     const removedSong = musicQueue[index];
-    setMusicQueue(prev => prev.filter((_, i) => i !== index));
     if (removedSong) {
+      playbackEngine.removeSongFromQueue(removedSong.id);
       addNotification("info", `Removed "${removedSong.title}" from queue`);
-    }
-    if (queueIndex === index) {
-      onNextSong();
-    } else if (queueIndex > index) {
-      setQueueIndex(prev => prev - 1);
     }
   };
 
   const handleClearQueue = () => {
-    setMusicQueue([]);
-    setQueueIndex(0);
+    playbackEngine.stop();
+    playbackEngine.initializeSongs([]);
     addNotification("info", "Cleared music queue");
   };
 
@@ -1516,6 +1536,14 @@ export default function App() {
             onSendJamMessage={handleSendJamMessage}
           />
         );
+      case "layers":
+        return (
+          <AmbientLayers
+            engine={playbackEngine}
+            songs={songs}
+            onPlaySongDirectly={handlePlaySongDirectly}
+          />
+        );
       case "profile":
         return (
           <ProfilePanel
@@ -1545,16 +1573,18 @@ export default function App() {
 
   return (
     <div id="melo-app" className="relative z-10 w-full max-w-[430px] md:max-w-[800px] lg:max-w-[1200px] mx-auto min-h-screen bg-mulberry-base text-mulberry-on flex flex-col justify-between selection:bg-mulberry-primary selection:text-mulberry-base font-sans shadow-[0_0_120px_rgba(0,0,0,0.9)] overflow-x-hidden md:border-x md:border-white/5">
-      {/* Sound Engine Node (Browser Audio context oscillator synthesizer loop) */}
-      <AudioEngine isPlaying={isPlaying} songId={currentSong ? currentSong.id : null} eqBands={eqBands} />
-
       {/* YouTube Player Node */}
       {currentSong && (currentSong.id.startsWith("yt_") || currentSong.videoId) && (
         <YouTubePlayer
           videoId={(currentSong.videoId || currentSong.id).replace(/^(yt_)+/, "")}
           isPlaying={isPlaying}
-          onTimeUpdate={(currentTime) => setProgress(Math.floor(currentTime))}
-          onEnded={onNextSong}
+          onTimeUpdate={(currentTime, duration) => {
+            setProgress(Math.floor(currentTime));
+            playbackEngine.notifyYouTubeProgress(currentTime, duration || 180);
+          }}
+          onEnded={() => {
+            playbackEngine.notifyYouTubeEnded();
+          }}
           onReady={() => console.log("YouTube Player Ready")}
           seekTo={ytSeekTo}
           onError={handlePlayerError}
@@ -1897,6 +1927,15 @@ export default function App() {
         >
           <span className="text-lg">♪</span>
           <span className="text-[9px] uppercase tracking-wider mt-0.5">Playing</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab("layers")}
+          className={`flex flex-col items-center justify-center transition-all duration-200 cursor-pointer ${activeTab === "layers" ? "text-[#FF007A]" : "text-white/40 hover:text-white/60"
+            }`}
+        >
+          <span className="text-lg">✧</span>
+          <span className="text-[9px] uppercase tracking-wider mt-0.5">Layers</span>
         </button>
 
         <button

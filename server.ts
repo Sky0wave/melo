@@ -1571,9 +1571,9 @@ app.get("/api/stream/:videoId", async (req, res) => {
       quality: 0
     });
 
-    if (stream && stream.url) {
+    if (stream && (stream as any).url) {
       console.log(`[Stream API] Successfully resolved stream URL. Redirecting client...`);
-      return res.redirect(stream.url);
+      return res.redirect((stream as any).url);
     } else {
       throw new Error("No stream URL returned from play-dl");
     }
