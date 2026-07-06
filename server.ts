@@ -2309,7 +2309,7 @@ app.get("/api/user/playlists", async (req, res) => {
   if (isNaN(userId)) return res.status(400).json({ error: "Invalid user ID" });
   try {
     const { rows } = await pool.query(
-      `SELECT p.id::text, p.name, p.description, p.cover_url,
+      `SELECT p.id::text, p.name, p.description, p.cover_url, p.user_id::text AS user_id,
               COALESCE(
                 json_agg(
                   json_build_object(
@@ -2339,6 +2339,7 @@ app.get("/api/user/playlists", async (req, res) => {
       name: r.name,
       description: r.description || "Dynamic high-fidelity music collection.",
       isCustom: true,
+      user_id: r.user_id,
       songs: r.songs,
       coverUrl: r.cover_url || "https://images.unsplash.com/photo-1614149162883-504ce4d13909?w=300"
     })));
@@ -2368,7 +2369,7 @@ app.get("/api/playlists/:id", async (req, res) => {
   if (isNaN(id)) return res.status(400).json({ error: "Invalid playlist ID" });
   try {
     const { rows } = await pool.query(
-      `SELECT p.id::text, p.name, p.description, p.cover_url, p.user_id,
+      `SELECT p.id::text, p.name, p.description, p.cover_url, p.user_id::text AS user_id,
               COALESCE(
                 json_agg(
                   json_build_object(
@@ -2399,6 +2400,7 @@ app.get("/api/playlists/:id", async (req, res) => {
       name: r.name,
       description: r.description || "Dynamic high-fidelity music collection.",
       isCustom: true,
+      user_id: r.user_id,
       songs: r.songs,
       coverUrl: r.cover_url || "https://images.unsplash.com/photo-1614149162883-504ce4d13909?w=300"
     });

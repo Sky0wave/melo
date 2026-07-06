@@ -1080,6 +1080,7 @@ export default function App() {
         coverUrl: "https://lh3.googleusercontent.com/aida-public/AB6AXuDesJQhVHAwD48gusRnhSWxi2Wr4Se4dXJ2dNzny1LFufaJZskiTKIqdRsCcw180iEcexkCxubLMpt4CcIn01QzrzbAYlyyb15lMkDwy5-w82vvPYCnV_jl4NM-ctTd-lFkGawRTWky4mNLUpivTYBXLAfZSQV9gpm3aj3biLnKxwR794EB0klNZ51Mhb8POyFyI7nJOnQzK_HMq2v-WEw3bkzEMEM_FExWR1qVHUfoli1rlhkB9Z783f5QAQq7Yuwt9FXFr6tHk1Q"
       };
       setPlaylists(prev => [...prev, newPL]);
+      setSelectedPlaylistId(newPL.id);
       addNotification("success", `Created playlist "${name}"`);
       return;
     }
@@ -1124,6 +1125,11 @@ export default function App() {
         if (plRes.ok) {
           const plData = await plRes.json();
           setPlaylists(plData);
+          // Auto-select the newly created/cloned playlist
+          const newlyCreated = plData.find((p: any) => String(p.id) === String(playlistId));
+          if (newlyCreated) {
+            setSelectedPlaylistId(newlyCreated.id);
+          }
         }
         addNotification("success", `Created playlist "${name}"`);
       } else {
