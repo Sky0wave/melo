@@ -263,6 +263,7 @@ export default function App() {
   const [username, setUsername] = useState("skywave_listener");
   const [favorites, setFavorites] = useState<string[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
   const [listeningHabits, setListeningHabits] = useState<ListeningHabit[]>([]);
 
   // Equalizer, Queue, Notifications and Media Session states
@@ -270,6 +271,7 @@ export default function App() {
   const [isEqualizerOpen, setIsEqualizerOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isJamModalOpen, setIsJamModalOpen] = useState(false);
+  const [modalMessageText, setModalMessageText] = useState("");
   const [eqBands, setEqBands] = useState<number[]>([0, 0, 0, 0, 0]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [toasts, setToasts] = useState<NotificationItem[]>([]);
@@ -374,6 +376,39 @@ export default function App() {
     }
   }, []);
 
+  // Load shared playlist from URL if present
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sharedPlaylistId = params.get("sharedPlaylist");
+    if (sharedPlaylistId) {
+      // Clean URL parameters immediately
+      const cleanUrl = window.location.origin + window.location.pathname;
+      window.history.replaceState({}, document.title, cleanUrl);
+
+      fetch(`/api/playlists/${sharedPlaylistId}`)
+        .then(res => {
+          if (!res.ok) throw new Error("Playlist not found");
+          return res.json();
+        })
+        .then(playlistData => {
+          // Add this playlist to local state if not already present
+          setPlaylists(prev => {
+            if (prev.some(p => String(p.id) === String(playlistData.id))) {
+              return prev.map(p => String(p.id) === String(playlistData.id) ? playlistData : p);
+            }
+            return [playlistData, ...prev];
+          });
+          setSelectedPlaylistId(playlistData.id);
+          setActiveTab("library");
+          addNotification("success", `Loaded shared playlist "${playlistData.name}"`);
+        })
+        .catch(err => {
+          console.warn("Failed to load shared playlist:", err);
+          addNotification("error", "Failed to load shared playlist.");
+        });
+    }
+  }, []);
+
   // Load user data from DB upon login
   useEffect(() => {
     if (!googleUser || !googleUser.id) {
@@ -428,7 +463,7 @@ export default function App() {
               lyrics: "",
               coverUrl: `https://img.youtube.com/vi/${lastSong.song_id ? lastSong.song_id.replace(/^(yt_)+/, "") : ""}/hqdefault.jpg`,
               videoId: lastSong.song_id ? lastSong.song_id.replace(/^(yt_)+/, "") : "",
-              source: "youtube"
+              source: "youtube" as const
             };
             setCurrentSong(matchedSong);
             setIsPlaying(false);
@@ -1101,6 +1136,35 @@ export default function App() {
     }
   };
 
+  const handleDeletePlaylist = async (playlistId: string) => {
+    const targetPlaylist = playlists.find(p => p.id === playlistId);
+    const isOwner = googleUser && googleUser.id && targetPlaylist && targetPlaylist.user_id && String(targetPlaylist.user_id) === String(googleUser.id);
+
+    if (playlistId.startsWith("pl_") || playlistId.startsWith("ai_daily_") || !isOwner) {
+      setPlaylists(prev => prev.filter(p => p.id !== playlistId));
+      addNotification("info", "Removed playlist");
+      return;
+    }
+
+    if (!googleUser || !googleUser.id) return;
+
+    try {
+      const res = await fetch(`/api/user/playlists/${playlistId}?userId=${googleUser.id}`, {
+        method: "DELETE"
+      });
+      if (res.ok) {
+        setPlaylists(prev => prev.filter(p => p.id !== playlistId));
+        addNotification("info", "Deleted playlist successfully");
+      } else {
+        const errData = await res.json();
+        addNotification("error", `Failed to delete playlist: ${errData.error || "Server error"}`);
+      }
+    } catch (err: any) {
+      console.warn("Failed deleting database playlist:", err);
+      addNotification("error", `Failed to delete playlist: ${err.message || "Network error"}`);
+    }
+  };
+
   const handleAddPlaylistDirect = (pl: Playlist) => {
     setPlaylists(prev => [...prev, pl]);
   };
@@ -1408,6 +1472,11 @@ export default function App() {
             onRemoveFromPlaylist={handleRemoveFromPlaylist}
             recentHistory={listeningHabits}
             onAddPlaylist={handleAddPlaylistDirect}
+            selectedPlaylistId={selectedPlaylistId}
+            onSelectPlaylist={setSelectedPlaylistId}
+            onDeletePlaylist={handleDeletePlaylist}
+            onNotification={addNotification}
+            googleUser={googleUser}
           />
         );
       case "playing":
@@ -1550,6 +1619,7 @@ export default function App() {
           isPlaying={isPlaying}
           onTogglePlay={() => setIsPlaying(p => !p)}
           onNextSong={onNextSong}
+          onPreviousSong={onPreviousSong}
           progress={progress}
           onClick={() => setActiveTab("playing")}
           followingTarget={followingTarget}
@@ -1689,11 +1759,67 @@ export default function App() {
                   </button>
                 </div>
 
+                {/* Jam Chat Section inside Modal */}
+                <div className="border-t border-white/10 pt-4 mt-4 space-y-3">
+                  <h4 className="text-[10px] font-sans font-bold text-[#FF007A] uppercase tracking-widest flex items-center gap-1">
+                    <span>💬</span> Jam Chat Stream
+                  </h4>
+                  <div 
+                    className="h-[150px] overflow-y-auto custom-scrollbar space-y-2 pr-1 text-left bg-black/40 rounded-xl p-3 border border-white/5"
+                    ref={(el) => {
+                      if (el) el.scrollTop = el.scrollHeight;
+                    }}
+                  >
+                    {chatMessages.length === 0 ? (
+                      <p className="font-sans text-[10px] text-white/30 italic text-center py-10">
+                        No messages yet. Say hello to the room!
+                      </p>
+                    ) : (
+                      chatMessages.map((msg, index) => (
+                        <div key={msg.id || index} className="bg-white/[0.03] border border-white/5 rounded-lg p-2">
+                          <span className="font-sans text-[9px] font-bold text-[#FF007A] block">
+                            {msg.username}
+                          </span>
+                          <p className="font-sans text-[10px] text-white/80 mt-0.5">
+                            {msg.message}
+                          </p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Type a message to the group..."
+                      value={modalMessageText}
+                      onChange={(e) => setModalMessageText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && modalMessageText.trim()) {
+                          handleSendJamMessage(modalMessageText);
+                          setModalMessageText("");
+                        }
+                      }}
+                      className="flex-1 bg-black/60 border border-white/10 rounded-lg px-2.5 py-1.5 text-[10px] text-white focus:outline-none focus:border-[#FF007A] font-sans"
+                    />
+                    <button
+                      onClick={() => {
+                        if (modalMessageText.trim()) {
+                          handleSendJamMessage(modalMessageText);
+                          setModalMessageText("");
+                        }
+                      }}
+                      className="bg-[#FF007A] hover:bg-[#FF007A]/80 text-white px-3.5 py-1.5 rounded-lg text-[9px] font-sans font-bold uppercase cursor-pointer transition-colors"
+                    >
+                      Send
+                    </button>
+                  </div>
+                </div>
+
                 <button
                   onClick={() => setIsJamModalOpen(false)}
                   className="w-full py-3.5 bg-gradient-to-r from-purple-600 to-[#FF007A] hover:opacity-95 text-white rounded-xl font-sans text-xs font-bold uppercase tracking-widest transition-opacity cursor-pointer shadow-[0_4px_15px_rgba(255,0,122,0.3)]"
                 >
-                  {jamRoom.isHost ? "Start Playing & Hosting" : "Start Listening & Syncing"}
+                  {jamRoom.isHost ? "Start Playing & Hosting" : "Start Syncing"}
                 </button>
               </div>
             ) : (
@@ -1710,10 +1836,16 @@ export default function App() {
 
       {/* Floating Jam Room Info in bottom right */}
       {jamRoom && (
-        <div className="fixed bottom-20 right-4 z-50 bg-[#0f0b0d]/95 border border-[#FF007A]/40 rounded-2xl p-3 shadow-[0_0_20px_rgba(255,0,122,0.15)] backdrop-blur-md text-left font-sans text-xs text-white">
-          <div className="flex items-center gap-1.5 mb-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#FF007A] animate-ping"></span>
-            <span className="text-[9px] uppercase tracking-wider text-[#FF007A] font-bold">JAM SESSION</span>
+        <div 
+          onClick={() => setIsJamModalOpen(true)}
+          className="fixed bottom-20 right-4 z-50 bg-[#0f0b0d]/95 border border-[#FF007A]/40 hover:border-[#FF007A] rounded-2xl p-3 shadow-[0_0_20px_rgba(255,0,122,0.15)] hover:shadow-[0_0_25px_rgba(255,0,122,0.3)] backdrop-blur-md text-left font-sans text-xs text-white cursor-pointer transition-all active:scale-95 group"
+        >
+          <div className="flex items-center justify-between gap-3 mb-1.5">
+            <div className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#FF007A] animate-ping"></span>
+              <span className="text-[9px] uppercase tracking-wider text-[#FF007A] font-bold">JAM SESSION</span>
+            </div>
+            <span className="text-[8px] bg-[#FF007A]/10 border border-[#FF007A]/20 px-1 rounded text-[#FF007A] font-bold uppercase tracking-wider opacity-60 group-hover:opacity-100 transition-opacity">Chat 💬</span>
           </div>
           <div className="font-mono text-[11px] space-y-0.5">
             <div>ID: <span className="text-white font-bold select-all">{jamRoom.room_id}</span></div>

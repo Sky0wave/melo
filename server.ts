@@ -2363,6 +2363,50 @@ app.get("/api/user/playlists/:id", async (req, res) => {
   }
 });
 
+app.get("/api/playlists/:id", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid playlist ID" });
+  try {
+    const { rows } = await pool.query(
+      `SELECT p.id::text, p.name, p.description, p.cover_url, p.user_id,
+              COALESCE(
+                json_agg(
+                  json_build_object(
+                    'id', 'yt_' || s.video_id,
+                    'videoId', s.video_id,
+                    'title', s.title,
+                    'artist', s.artist,
+                    'duration', s.duration,
+                    'durationSeconds', s.duration_seconds,
+                    'coverUrl', s.cover_url,
+                    'album', 'Library Cache',
+                    'genre', COALESCE(s.language, 'unknown'),
+                    'mood', 'Premium'
+                  )
+                ) FILTER (WHERE s.video_id IS NOT NULL), '[]'
+              ) AS songs
+       FROM user_playlists p
+       LEFT JOIN user_playlist_songs ups ON ups.playlist_id = p.id
+       LEFT JOIN songs s ON s.video_id = ups.song_video_id
+       WHERE p.id = $1
+       GROUP BY p.id`,
+      [id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: "Playlist not found" });
+    const r = rows[0];
+    res.json({
+      id: r.id,
+      name: r.name,
+      description: r.description || "Dynamic high-fidelity music collection.",
+      isCustom: true,
+      songs: r.songs,
+      coverUrl: r.cover_url || "https://images.unsplash.com/photo-1614149162883-504ce4d13909?w=300"
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post("/api/user/playlists", async (req, res) => {
   const { userId, name, description, coverUrl } = req.body;
   if (!userId || !name) return res.status(400).json({ error: "Missing fields" });
@@ -2380,7 +2424,15 @@ app.post("/api/user/playlists", async (req, res) => {
 app.delete("/api/user/playlists/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid playlist ID" });
+  const userIdStr = req.query.userId as string;
   try {
+    if (userIdStr) {
+      const userId = parseInt(userIdStr, 10);
+      if (!isNaN(userId)) {
+        await pool.query("DELETE FROM user_playlists WHERE id = $1 AND user_id = $2", [id, userId]);
+        return res.json({ success: true });
+      }
+    }
     await pool.query("DELETE FROM user_playlists WHERE id = $1", [id]);
     res.json({ success: true });
   } catch (err: any) {

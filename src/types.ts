@@ -22,6 +22,7 @@ export interface Playlist {
   songs: Song[];
   isCustom: boolean; // Custom created by user vs premium curated
   coverUrl: string;
+  user_id?: number | string;
 }
 
 export interface ListeningHabit {

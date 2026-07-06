@@ -1,11 +1,11 @@
 import React, { useState } from "react";
-import { Play, Sparkles, Plus, Trash2, ArrowRight, Heart, ListMusic, RefreshCw, Shuffle, FolderPlus } from "lucide-react";
+import { Play, Sparkles, Plus, Trash2, ArrowRight, Heart, ListMusic, RefreshCw, Shuffle, FolderPlus, Share2 } from "lucide-react";
 import { Song, Playlist } from "../types";
 
 interface LibraryManagerProps {
   likedSongs: Song[];
   playlists: Playlist[];
-  onCreatePlaylist: (name: string, description: string) => void;
+  onCreatePlaylist: (name: string, description: string, initialSongs?: Song[]) => void;
   onPlaySong: (song: Song) => void;
   favorites: string[];
   onToggleFavorite: (id: string) => void;
@@ -13,6 +13,11 @@ interface LibraryManagerProps {
   onRemoveFromPlaylist: (songId: string, playlistId: string) => void;
   recentHistory: { songTitle: string; artist: string; count: number }[];
   onAddPlaylist: (playlist: Playlist) => void;
+  selectedPlaylistId: string | null;
+  onSelectPlaylist: (id: string | null) => void;
+  onDeletePlaylist: (id: string) => void;
+  onNotification: (type: "success" | "error" | "info" | "warning", msg: string) => void;
+  googleUser: any;
 }
 
 export function LibraryManager({
@@ -25,13 +30,17 @@ export function LibraryManager({
   onTrackQueueChange,
   onRemoveFromPlaylist,
   recentHistory,
-  onAddPlaylist
+  onAddPlaylist,
+  selectedPlaylistId,
+  onSelectPlaylist,
+  onDeletePlaylist,
+  onNotification,
+  googleUser
 }: LibraryManagerProps) {
   const [activeChip, setActiveChip] = useState<"playlists" | "all">("all");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState("");
   const [newPlaylistDesc, setNewPlaylistDesc] = useState("");
-  const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
   const [generatingDaily, setGeneratingDaily] = useState(false);
 
   // Selected custom playlist detailed view
@@ -87,7 +96,7 @@ export function LibraryManager({
           coverUrl: "https://images.unsplash.com/photo-1614149162883-504ce4d13909?w=300"
         };
         onAddPlaylist(newAIPlaylist);
-        setSelectedPlaylistId(newAIPlaylist.id);
+        onSelectPlaylist(newAIPlaylist.id);
         setActiveChip("playlists");
       }
     } catch (err) {
@@ -97,6 +106,31 @@ export function LibraryManager({
     }
   };
 
+  const handleSharePlaylist = (playlist: Playlist) => {
+    if (playlist.id.startsWith("pl_") || playlist.id.startsWith("ai_daily_")) {
+      onNotification("warning", "Please sign in to share playlists!");
+      return;
+    }
+    const shareUrl = `${window.location.origin}?sharedPlaylist=${playlist.id}`;
+    navigator.clipboard.writeText(shareUrl)
+      .then(() => {
+        onNotification("success", "Shareable link copied to clipboard!");
+      })
+      .catch((err) => {
+        console.error("Clipboard copy failed:", err);
+        onNotification("error", "Failed to copy link to clipboard.");
+      });
+  };
+
+  const handleClonePlaylist = (playlist: Playlist) => {
+    onCreatePlaylist(
+      `${playlist.name} (Copy)`,
+      playlist.description || "Copied from shared link.",
+      playlist.songs
+    );
+    onNotification("success", `Cloned playlist "${playlist.name}" to your library!`);
+  };
+
   return (
     <div className="space-y-6 animate-fade-in text-left">
       {/* If looking at custom playlist details, show back view */}
@@ -104,7 +138,7 @@ export function LibraryManager({
         <section className="space-y-4">
           <div className="flex justify-between items-center">
             <button 
-              onClick={() => setSelectedPlaylistId(null)}
+              onClick={() => onSelectPlaylist(null)}
               className="text-[10px] font-sans font-bold text-[#FF007A] uppercase tracking-wider hover:underline flex items-center gap-1 cursor-pointer"
             >
               ← Back
@@ -139,6 +173,43 @@ export function LibraryManager({
                   >
                     <Shuffle className="w-2.5 h-2.5" /> Shuffle
                   </button>
+                  <button
+                    onClick={() => handleSharePlaylist(selectedPlaylist)}
+                    className="w-full bg-white/5 border border-white/5 text-white py-2 rounded-xl font-sans text-[8px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer hover:bg-white/10 active:scale-95 transition-all"
+                  >
+                    <Share2 className="w-2.5 h-2.5 text-[#FF007A]" /> Share Playlist
+                  </button>
+                  {googleUser && googleUser.id && selectedPlaylist.user_id && String(selectedPlaylist.user_id) !== String(googleUser.id) ? (
+                    <>
+                      <button
+                        onClick={() => handleClonePlaylist(selectedPlaylist)}
+                        className="w-full bg-[#FF007A]/25 border border-[#FF007A]/40 text-white py-2 rounded-xl font-sans text-[8px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer hover:bg-[#FF007A] active:scale-95 transition-all"
+                      >
+                        <FolderPlus className="w-2.5 h-2.5" /> Save copy to Library
+                      </button>
+                      <button
+                        onClick={() => {
+                          onSelectPlaylist(null);
+                          onDeletePlaylist(selectedPlaylist.id);
+                        }}
+                        className="w-full bg-white/5 border border-white/5 text-white/70 py-2 rounded-xl font-sans text-[8px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer hover:bg-white/10 active:scale-95 transition-all"
+                      >
+                        <Trash2 className="w-2.5 h-2.5" /> Remove from View
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        if (window.confirm("Are you sure you want to delete this playlist?")) {
+                          onDeletePlaylist(selectedPlaylist.id);
+                          onSelectPlaylist(null);
+                        }
+                      }}
+                      className="w-full bg-red-950/20 border border-red-500/20 text-red-400 py-2 rounded-xl font-sans text-[8px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer hover:bg-red-500/10 active:scale-95 transition-all"
+                    >
+                      <Trash2 className="w-2.5 h-2.5" /> Delete Playlist
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -293,7 +364,7 @@ export function LibraryManager({
                       {playlists.map(pl => (
                         <div
                           key={pl.id}
-                          onClick={() => setSelectedPlaylistId(pl.id)}
+                          onClick={() => onSelectPlaylist(pl.id)}
                           className="glass-panel p-2.5 rounded-xl flex items-center justify-between hover:bg-white/5 cursor-pointer group border border-transparent hover:border-white/5"
                         >
                           <div className="flex items-center gap-3 min-w-0">
