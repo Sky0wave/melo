@@ -10,7 +10,8 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "dev-suite": "node scripts/dev-suite/server.js",
-    "build:preview": "eas build --platform android --profile preview --non-interactive"
+    "build:preview": "eas build --platform android --profile preview --non-interactive",
+    "postinstall": "npx patch-package"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
@@ -52,7 +53,8 @@
     "babel-preset-expo": "~54.0.10",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",
-    "typescript": "~5.9.2"
+    "typescript": "~5.9.2",
+    "patch-package": "^8.0.1"
   },
   "private": true
 }
