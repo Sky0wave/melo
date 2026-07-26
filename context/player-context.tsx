@@ -239,6 +239,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const webViewRef = useRef<any>(null);
 
   const isYoutubeTrack = (song: Song | null): boolean => {
+    if (Platform.OS !== 'web') return false;
     if (!song) return false;
     const isYtId = song.id && (song.id.startsWith('yt_') || /^[a-zA-Z0-9_-]{11}$/.test(song.id));
     return !!isYtId || !!song.youtube_url || (song as any).source === 'youtube';
