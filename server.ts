@@ -2313,18 +2313,18 @@ app.get("/api/user/playlists", async (req, res) => {
               COALESCE(
                 json_agg(
                   json_build_object(
-                    'id', 'yt_' || s.video_id,
-                    'videoId', s.video_id,
-                    'title', s.title,
-                    'artist', s.artist,
-                    'duration', s.duration,
-                    'durationSeconds', s.duration_seconds,
-                    'coverUrl', s.cover_url,
+                    'id', COALESCE('yt_' || s.video_id, ups.song_video_id),
+                    'videoId', COALESCE(s.video_id, ups.song_video_id),
+                    'title', COALESCE(s.title, 'Track'),
+                    'artist', COALESCE(s.artist, 'Unknown Artist'),
+                    'duration', COALESCE(s.duration, '03:00'),
+                    'durationSeconds', COALESCE(s.duration_seconds, 180),
+                    'coverUrl', COALESCE(s.cover_url, 'https://images.unsplash.com/photo-1614149162883-504ce4d13909?w=300'),
                     'album', 'Library Cache',
                     'genre', COALESCE(s.language, 'unknown'),
                     'mood', 'Premium'
                   )
-                ) FILTER (WHERE s.video_id IS NOT NULL), '[]'
+                ) FILTER (WHERE ups.song_video_id IS NOT NULL), '[]'
               ) AS songs
        FROM user_playlists p
        LEFT JOIN user_playlist_songs ups ON ups.playlist_id = p.id
@@ -2349,14 +2349,23 @@ app.get("/api/user/playlists", async (req, res) => {
 });
 
 app.get("/api/user/playlists/:id", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (isNaN(id)) return res.status(400).json({ error: "Invalid playlist ID" });
+  const rawId = req.params.id;
+  const idNum = parseInt(rawId, 10);
   try {
-    const playlistRes = await pool.query("SELECT * FROM user_playlists WHERE id = $1", [id]);
+    let playlistRes;
+    if (!isNaN(idNum)) {
+      playlistRes = await pool.query("SELECT * FROM user_playlists WHERE id = $1", [idNum]);
+    } else {
+      playlistRes = await pool.query("SELECT * FROM user_playlists WHERE id::text = $1", [rawId]);
+    }
     if (playlistRes.rows.length === 0) return res.status(404).json({ error: "Playlist not found" });
-    const songsRes = await pool.query("SELECT song_video_id FROM user_playlist_songs WHERE playlist_id = $1 ORDER BY added_at ASC", [id]);
+    const playlist = playlistRes.rows[0];
+    const songsRes = await pool.query(
+      "SELECT song_video_id FROM user_playlist_songs WHERE (playlist_id = $1 OR playlist_id::text = $2) ORDER BY added_at ASC",
+      [isNaN(idNum) ? -1 : idNum, rawId]
+    );
     res.json({
-      playlist: playlistRes.rows[0],
+      playlist,
       songVideoIds: songsRes.rows.map(r => r.song_video_id)
     });
   } catch (err: any) {
@@ -2365,33 +2374,33 @@ app.get("/api/user/playlists/:id", async (req, res) => {
 });
 
 app.get("/api/playlists/:id", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (isNaN(id)) return res.status(400).json({ error: "Invalid playlist ID" });
+  const rawId = req.params.id;
+  const idNum = parseInt(rawId, 10);
   try {
     const { rows } = await pool.query(
       `SELECT p.id::text, p.name, p.description, p.cover_url, p.user_id::text AS user_id,
               COALESCE(
                 json_agg(
                   json_build_object(
-                    'id', 'yt_' || s.video_id,
-                    'videoId', s.video_id,
-                    'title', s.title,
-                    'artist', s.artist,
-                    'duration', s.duration,
-                    'durationSeconds', s.duration_seconds,
-                    'coverUrl', s.cover_url,
+                    'id', COALESCE('yt_' || s.video_id, ups.song_video_id),
+                    'videoId', COALESCE(s.video_id, ups.song_video_id),
+                    'title', COALESCE(s.title, 'Track'),
+                    'artist', COALESCE(s.artist, 'Unknown Artist'),
+                    'duration', COALESCE(s.duration, '03:00'),
+                    'durationSeconds', COALESCE(s.duration_seconds, 180),
+                    'coverUrl', COALESCE(s.cover_url, 'https://images.unsplash.com/photo-1614149162883-504ce4d13909?w=300'),
                     'album', 'Library Cache',
                     'genre', COALESCE(s.language, 'unknown'),
                     'mood', 'Premium'
                   )
-                ) FILTER (WHERE s.video_id IS NOT NULL), '[]'
+                ) FILTER (WHERE ups.song_video_id IS NOT NULL), '[]'
               ) AS songs
        FROM user_playlists p
        LEFT JOIN user_playlist_songs ups ON ups.playlist_id = p.id
        LEFT JOIN songs s ON s.video_id = ups.song_video_id
-       WHERE p.id = $1
+       WHERE (p.id = $1 OR p.id::text = $2)
        GROUP BY p.id`,
-      [id]
+      [isNaN(idNum) ? -1 : idNum, rawId]
     );
     if (rows.length === 0) return res.status(404).json({ error: "Playlist not found" });
     const r = rows[0];
@@ -2482,17 +2491,19 @@ app.delete("/api/user/playlists/songs", async (req, res) => {
   try {
     const playlistIdNum = parseInt(rawPlaylistId, 10);
     const cleanSongId = rawSongId.replace(/^(yt_)+/, "");
-    if (!isNaN(playlistIdNum)) {
-      await pool.query(
-        "DELETE FROM user_playlist_songs WHERE playlist_id = $1 AND (song_video_id = $2 OR song_video_id = $3 OR song_video_id = $4)",
-        [playlistIdNum, cleanSongId, rawSongId, `yt_${cleanSongId}`]
-      );
-    } else {
-      await pool.query(
-        "DELETE FROM user_playlist_songs WHERE playlist_id::text = $1 AND (song_video_id = $2 OR song_video_id = $3 OR song_video_id = $4)",
-        [rawPlaylistId, cleanSongId, rawSongId, `yt_${cleanSongId}`]
-      );
-    }
+    await pool.query(
+      `DELETE FROM user_playlist_songs 
+       WHERE (playlist_id = $1 OR playlist_id::text = $2) 
+         AND (song_video_id = $3 OR song_video_id = $4 OR song_video_id = $5 OR song_video_id = $6)`,
+      [
+        isNaN(playlistIdNum) ? -1 : playlistIdNum,
+        rawPlaylistId,
+        cleanSongId,
+        rawSongId,
+        `yt_${cleanSongId}`,
+        cleanSongId.replace(/^(yt_)+/, '')
+      ]
+    );
     res.json({ success: true });
   } catch (err: any) {
     res.json({ success: true });
