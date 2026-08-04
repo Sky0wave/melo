@@ -2470,13 +2470,13 @@ app.post("/api/user/playlists/songs", async (req, res) => {
 
 app.delete("/api/user/playlists/songs", async (req, res) => {
   const playlistId = parseInt(req.query.playlistId as string, 10);
-  const songVideoId = req.query.songVideoId as string;
-  if (isNaN(playlistId) || !songVideoId) return res.status(400).json({ error: "Missing fields" });
+  const rawSongId = (req.query.songVideoId || req.query.songId) as string;
+  if (isNaN(playlistId) || !rawSongId) return res.status(400).json({ error: "Missing fields" });
   try {
-    const cleanSongId = songVideoId.replace(/^(yt_)+/, "");
+    const cleanSongId = rawSongId.replace(/^(yt_)+/, "");
     await pool.query(
-      "DELETE FROM user_playlist_songs WHERE playlist_id = $1 AND song_video_id = $2",
-      [playlistId, cleanSongId]
+      "DELETE FROM user_playlist_songs WHERE playlist_id = $1 AND (song_video_id = $2 OR song_video_id = $3 OR song_video_id = $4)",
+      [playlistId, cleanSongId, rawSongId, `yt_${cleanSongId}`]
     );
     res.json({ success: true });
   } catch (err: any) {

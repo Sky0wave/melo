@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Play, Pause, Shuffle, Repeat, Heart, Users, Sparkles, Plus, Check, Trash2, FolderPlus, Radio, Sliders, ListMusic } from "lucide-react";
+import { Play, Pause, Shuffle, Repeat, Heart, Users, Sparkles, Plus, Check, Trash2, FolderPlus, Radio, Sliders, ListMusic, Download } from "lucide-react";
 import { Song, Playlist } from "../types";
 
 interface ActivePlayerProps {
@@ -404,6 +404,25 @@ export function ActivePlayer({
         >
           <Heart className={`w-3.5 h-3.5 ${favorites.includes(currentSong.id) ? "fill-current" : ""}`} />
           Like
+        </button>
+        <span className="text-white/10">|</span>
+        <button
+          onClick={() => {
+            const videoId = currentSong.id.replace(/^(yt_)+/, '') || (currentSong as any).videoId;
+            const downloadUrl = videoId ? `/api/stream/${videoId}` : currentSong.youtubeUrl || '';
+            if (downloadUrl) {
+              const a = document.createElement('a');
+              a.href = downloadUrl;
+              a.download = `${currentSong.title} - ${currentSong.artist}.mp3`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+            }
+          }}
+          className="flex items-center gap-1.5 text-[9px] font-sans font-bold uppercase tracking-wider text-white/40 hover:text-white/60 transition-colors cursor-pointer"
+        >
+          <Download className="w-3.5 h-3.5" />
+          Download
         </button>
         <span className="text-white/10">|</span>
         <button

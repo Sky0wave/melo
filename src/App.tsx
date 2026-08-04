@@ -1240,14 +1240,18 @@ export default function App() {
     }
   };
 
-  const handleRemoveFromPlaylist = async (songId: string, playlistId: string) => {
-    if (playlistId.startsWith("pl_")) {
-      setPlaylists(prev => prev.map(p => {
-        if (p.id === playlistId) {
-          return { ...p, songs: p.songs.filter(s => s.id !== songId) };
-        }
-        return p;
-      }));
+  const handleRemoveFromPlaylist = async (playlistId: string, songId: string) => {
+    setPlaylists(prev => prev.map(p => {
+      if (p.id === playlistId || String(p.id) === String(playlistId)) {
+        return {
+          ...p,
+          songs: (p.songs || []).filter(s => s.id !== songId && (s as any).videoId !== songId)
+        };
+      }
+      return p;
+    }));
+
+    if (playlistId.startsWith("pl_") || playlistId.startsWith("ai_daily_")) {
       addNotification("info", "Removed song from playlist");
       return;
     }
@@ -1256,7 +1260,7 @@ export default function App() {
 
     try {
       const cleanSongId = songId.replace(/^(yt_)+/, "");
-      const res = await fetch(`/api/user/playlists/songs?playlistId=${playlistId}&songVideoId=${cleanSongId}`, {
+      const res = await fetch(`/api/user/playlists/songs?playlistId=${playlistId}&songVideoId=${encodeURIComponent(cleanSongId)}&songId=${encodeURIComponent(songId)}`, {
         method: "DELETE"
       });
       if (res.ok) {
