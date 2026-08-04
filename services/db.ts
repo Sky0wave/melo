@@ -470,13 +470,14 @@ export const dbService = {
   },
 
   async removeSongFromPlaylist(userId: string, playlistId: string, songId: string): Promise<void> {
-    let videoId = getYoutubeVideoId('', songId);
+    const cleanSongId = songId.replace(/^(yt_)+/, '');
+    let videoId = cleanSongId;
 
     // Try to extract exact videoId or song id from current playlist songs
     try {
       const playlists = await this.getPlaylists(userId);
       const playlist = playlists.find(p => String(p.id) === String(playlistId));
-      const targetSong = playlist?.songs?.find(s => String(s.id) === String(songId) || (s as any).videoId === songId);
+      const targetSong = playlist?.songs?.find(s => String(s.id) === String(songId) || (s as any).videoId === songId || String(s.id) === cleanSongId || (s as any).videoId === cleanSongId);
       if (targetSong) {
         if ((targetSong as any).videoId) {
           videoId = (targetSong as any).videoId;
@@ -505,8 +506,10 @@ export const dbService = {
             ...p,
             songs: (p.songs || []).filter(s =>
               String(s.id) !== String(songId) &&
+              String(s.id) !== String(cleanSongId) &&
               (s as any).videoId !== videoId &&
-              (s as any).videoId !== songId
+              (s as any).videoId !== songId &&
+              (s as any).videoId !== cleanSongId
             )
           };
         }

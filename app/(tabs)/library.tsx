@@ -116,15 +116,34 @@ export default function LibraryScreen() {
   // Remove Song from Playlist
   const handleRemoveSongFromPlaylist = async (songId: string, songTitle: string) => {
     if (!selectedPlaylist || !user) return;
-    setPlaylistSongs(prev => prev.filter(s => s.id !== songId));
+    const cleanSongId = songId.replace(/^(yt_)+/, '');
+    
+    // Optimistic UI state removal
+    setPlaylistSongs(prev => prev.filter(s =>
+      String(s.id) !== String(songId) &&
+      String(s.id) !== String(cleanSongId) &&
+      (s as any).videoId !== songId &&
+      (s as any).videoId !== cleanSongId
+    ));
+    setSelectedPlaylist(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        songs: (prev.songs || []).filter(s =>
+          String(s.id) !== String(songId) &&
+          String(s.id) !== String(cleanSongId) &&
+          (s as any).videoId !== songId &&
+          (s as any).videoId !== cleanSongId
+        )
+      };
+    });
+
     try {
       await dbService.removeSongFromPlaylist(user.id, selectedPlaylist.id, songId);
-      await fetchPlaylistSongs(selectedPlaylist.id);
       await loadLibraryData();
       Alert.alert('Removed', `"${songTitle}" removed from playlist.`);
     } catch (err) {
       console.error('Error removing song:', err);
-      fetchPlaylistSongs(selectedPlaylist.id);
     }
   };
 
