@@ -17,6 +17,7 @@ import {
 import { usePlayer } from '@/context/player-context';
 import { useAuth } from '@/context/auth-context';
 import { dbService, Playlist, getSongCoverUrl } from '@/services/db';
+import { downloadService } from '@/services/download-service';
 import { Ionicons } from '@expo/vector-icons';
 
 const { width, height } = Dimensions.get('window');
@@ -236,18 +237,23 @@ export function AudioPlayer() {
   }, [currentSong]);
 
   // Sync favorites
+  const [isDownloaded, setIsDownloaded] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+
   useEffect(() => {
-    async function checkFav() {
+    async function checkFavAndDownload() {
       if (currentSong && user) {
         try {
           const fav = await dbService.isFavorite(user.id, currentSong.id);
           setIsFav(fav);
+          const down = await downloadService.isDownloaded(user.id, currentSong.id);
+          setIsDownloaded(down);
         } catch (err) {
-          console.error('Error checking favorite:', err);
+          console.error('Error checking status:', err);
         }
       }
     }
-    checkFav();
+    checkFavAndDownload();
   }, [currentSong, user]);
 
   // Toggle Favorite
@@ -258,6 +264,27 @@ export function AudioPlayer() {
       setIsFav(result);
     } catch (err) {
       console.error('Error toggling favorite:', err);
+    }
+  };
+
+  // Toggle Download for Offline Playback
+  const handleToggleDownload = async () => {
+    if (!user || !currentSong || isDownloading) return;
+    try {
+      setIsDownloading(true);
+      if (isDownloaded) {
+        await downloadService.removeDownloadedSong(user.id, currentSong.id);
+        setIsDownloaded(false);
+        Alert.alert('Removed', `"${currentSong.title}" removed from offline downloads.`);
+      } else {
+        await downloadService.downloadSong(currentSong, user.id);
+        setIsDownloaded(true);
+        Alert.alert('Downloaded!', `"${currentSong.title}" saved for offline listening.`);
+      }
+    } catch (err) {
+      console.error('Error toggling download:', err);
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -435,13 +462,26 @@ export function AudioPlayer() {
               <Text style={styles.fullTitle} numberOfLines={1}>{currentSong.title}</Text>
               <Text style={styles.fullArtist} numberOfLines={1}>{currentSong.artist}</Text>
             </View>
-            <TouchableOpacity onPress={handleToggleFav} style={styles.favBtn}>
-              <Ionicons 
-                name={isFav ? "heart" : "heart-outline"} 
-                size={30} 
-                color={isFav ? "#EF4444" : "#ECEDEE"} 
-              />
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <TouchableOpacity onPress={handleToggleDownload} style={styles.favBtn} disabled={isDownloading}>
+                {isDownloading ? (
+                  <ActivityIndicator size="small" color="#FF007A" />
+                ) : (
+                  <Ionicons 
+                    name={isDownloaded ? "checkmark-circle" : "download-outline"} 
+                    size={28} 
+                    color={isDownloaded ? "#10B981" : "#ECEDEE"} 
+                  />
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleToggleFav} style={styles.favBtn}>
+                <Ionicons 
+                  name={isFav ? "heart" : "heart-outline"} 
+                  size={28} 
+                  color={isFav ? "#EF4444" : "#ECEDEE"} 
+                />
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* Segment Tab Selector (Like Web App) */}

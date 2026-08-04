@@ -1,5 +1,6 @@
 import React, { createContext, useState, useEffect, useContext, useRef } from 'react';
 import { Song, dbService, BACKEND_URL, SEED_SONGS } from '@/services/db';
+import { downloadService } from '@/services/download-service';
 import { useAuth } from './auth-context';
 import { isSupabaseConfigured } from '@/services/supabase-client';
 import { Platform, View } from 'react-native';
@@ -178,6 +179,7 @@ const PlayerContext = createContext<PlayerContextType | undefined>(undefined);
 
 // Helper to map songs to SoundHelix sample MP3 streams for real playback
 export const getAudioSourceForSong = (song: Song) => {
+  if ((song as any).localUri) return (song as any).localUri;
   const helixUrls: Record<string, string> = {
     'f5b5f25a-4933-4f0e-be4c-0c1598f828a1': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
     'f5b5f25a-4933-4f0e-be4c-0c1598f828a2': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
@@ -505,7 +507,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     if (!isAudioInitializedRef.current || !TrackPlayer) return;
 
     try {
-      const audioUrl = getAudioSourceForSong(song);
+      let audioUrl = (song as any).localUri;
+      if (!audioUrl && user?.id) {
+        try {
+          audioUrl = await downloadService.getLocalAudioUri(user.id, song.id);
+        } catch (e) {}
+      }
+      if (!audioUrl) {
+        audioUrl = getAudioSourceForSong(song);
+      }
       console.log('Creating TrackPlayer for URL:', audioUrl);
       
       await TrackPlayer.reset();

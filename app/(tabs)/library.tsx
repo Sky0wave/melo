@@ -13,9 +13,10 @@ import {
 import { useAuth } from '@/context/auth-context';
 import { usePlayer } from '@/context/player-context';
 import { dbService, Playlist, Song, getSongCoverUrl } from '@/services/db';
+import { downloadService } from '@/services/download-service';
 import { Ionicons } from '@expo/vector-icons';
 
-type TabType = 'playlists' | 'favorites';
+type TabType = 'playlists' | 'favorites' | 'downloads';
 
 export default function LibraryScreen() {
   const { user } = useAuth();
@@ -24,6 +25,7 @@ export default function LibraryScreen() {
   const [activeTab, setActiveTab] = useState<TabType>('playlists');
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [favorites, setFavorites] = useState<Song[]>([]);
+  const [downloads, setDownloads] = useState<Song[]>([]);
   
   // Create playlist modal
   const [createModalVisible, setCreateModalVisible] = useState(false);
@@ -40,9 +42,12 @@ export default function LibraryScreen() {
       if (activeTab === 'playlists') {
         const data = await dbService.getPlaylists(user.id);
         setPlaylists(data);
-      } else {
+      } else if (activeTab === 'favorites') {
         const data = await dbService.getFavorites(user.id);
         setFavorites(data);
+      } else if (activeTab === 'downloads') {
+        const data = await downloadService.getDownloadedSongs(user.id);
+        setDownloads(data);
       }
     } catch (err) {
       console.error('Error loading library data:', err);
@@ -111,12 +116,15 @@ export default function LibraryScreen() {
   // Remove Song from Playlist
   const handleRemoveSongFromPlaylist = async (songId: string, songTitle: string) => {
     if (!selectedPlaylist || !user) return;
+    setPlaylistSongs(prev => prev.filter(s => s.id !== songId));
     try {
       await dbService.removeSongFromPlaylist(user.id, selectedPlaylist.id, songId);
       await fetchPlaylistSongs(selectedPlaylist.id);
-      Alert.alert('Removed', `"${songTitle}" removed.`);
+      await loadLibraryData();
+      Alert.alert('Removed', `"${songTitle}" removed from playlist.`);
     } catch (err) {
       console.error('Error removing song:', err);
+      fetchPlaylistSongs(selectedPlaylist.id);
     }
   };
 
@@ -128,6 +136,18 @@ export default function LibraryScreen() {
       loadLibraryData();
     } catch (err) {
       console.error('Error removing favorite:', err);
+    }
+  };
+
+  // Remove Downloaded Song
+  const handleRemoveDownload = async (songId: string, songTitle: string) => {
+    if (!user) return;
+    try {
+      await downloadService.removeDownloadedSong(user.id, songId);
+      loadLibraryData();
+      Alert.alert('Deleted', `"${songTitle}" removed from downloads.`);
+    } catch (err) {
+      console.error('Error deleting download:', err);
     }
   };
 
@@ -162,6 +182,14 @@ export default function LibraryScreen() {
         >
           <Text style={[styles.tabText, activeTab === 'favorites' && styles.tabTextActive]}>
             Liked Songs
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.tab, activeTab === 'downloads' && styles.tabActive]}
+          onPress={() => setActiveTab('downloads')}
+        >
+          <Text style={[styles.tabText, activeTab === 'downloads' && styles.tabTextActive]}>
+            Downloads
           </Text>
         </TouchableOpacity>
       </View>
@@ -199,7 +227,7 @@ export default function LibraryScreen() {
             </TouchableOpacity>
           )}
         />
-      ) : (
+      ) : activeTab === 'favorites' ? (
         <FlatList
           data={favorites}
           keyExtractor={(item) => item.id}
@@ -240,6 +268,55 @@ export default function LibraryScreen() {
 
                 <TouchableOpacity onPress={() => handleRemoveFavorite(item.id)} style={{ padding: 8 }}>
                   <Ionicons name="heart" size={22} color="#EF4444" />
+                </TouchableOpacity>
+              </View>
+            );
+          }}
+        />
+      ) : (
+        <FlatList
+          data={downloads}
+          keyExtractor={(item) => `dl-${item.id}`}
+          contentContainerStyle={styles.listContent}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Ionicons name="download-outline" size={56} color="#4B5563" />
+              <Text style={styles.emptyTitle}>No Offline Downloads</Text>
+              <Text style={styles.emptySubtitle}>Downloaded songs will be available to play offline here.</Text>
+            </View>
+          }
+          renderItem={({ item }) => {
+            const isCurrent = currentSong?.id === item.id;
+            return (
+              <View style={[styles.songRow, isCurrent && styles.songRowActive]}>
+                <TouchableOpacity 
+                  style={styles.songMain}
+                  onPress={() => playSong(item, downloads)}
+                >
+                  <View style={styles.songRowImageContainer}>
+                    <Image 
+                      source={{ uri: getSongCoverUrl(item) }} 
+                      style={styles.songRowImage} 
+                    />
+                    {isCurrent && isPlaying && (
+                      <View style={styles.playingImageOverlay}>
+                        <Ionicons name="volume-medium" size={16} color="#FF007A" />
+                      </View>
+                    )}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Ionicons name="checkmark-circle" size={14} color="#10B981" />
+                      <Text style={[styles.songTitle, isCurrent && styles.songTitleActive]} numberOfLines={1}>
+                        {item.title}
+                      </Text>
+                    </View>
+                    <Text style={styles.songArtist} numberOfLines={1}>{item.artist} • Offline Available</Text>
+                  </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity onPress={() => handleRemoveDownload(item.id, item.title)} style={{ padding: 8 }}>
+                  <Ionicons name="trash-outline" size={22} color="#EF4444" />
                 </TouchableOpacity>
               </View>
             );

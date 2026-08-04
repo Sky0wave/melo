@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
+import { downloadService } from './download-service';
 
 // ==========================================
 // TYPESCRIPT TYPES & INTERFACES
@@ -328,56 +329,89 @@ export const dbService = {
   async getPlaylists(userId: string): Promise<Playlist[]> {
     try {
       const res = await fetch(`${BACKEND_URL}/api/user/playlists?userId=${userId}`);
-      if (!res.ok) return [];
-      const data = await res.json();
-      return data.map((p: any) => ({
-        id: p.id,
-        user_id: userId,
-        name: p.name,
-        cover_image: p.coverUrl || p.cover_image,
-        created_at: new Date().toISOString(),
-        songs: p.songs?.map((s: any) => ({
-          id: s.id,
-          title: s.title,
-          artist: s.artist,
-          youtube_url: `https://www.youtube.com/watch?v=${s.videoId}`,
-          coverUrl: s.coverUrl,
-          durationSeconds: s.durationSeconds
-        })) || []
-      }));
-    } catch {
-      return [];
+      if (res.ok) {
+        const data = await res.json();
+        const playlists: Playlist[] = data.map((p: any) => ({
+          id: String(p.id),
+          user_id: userId,
+          name: p.name,
+          cover_image: p.coverUrl || p.cover_image,
+          created_at: new Date().toISOString(),
+          songs: p.songs?.map((s: any) => ({
+            id: String(s.id || (s.videoId ? `yt_${s.videoId}` : '')),
+            videoId: s.videoId,
+            title: s.title,
+            artist: s.artist,
+            youtube_url: s.youtube_url || (s.videoId ? `https://www.youtube.com/watch?v=${s.videoId}` : ''),
+            coverUrl: s.coverUrl,
+            durationSeconds: s.durationSeconds || 180
+          })) || []
+        }));
+        await saveUserLocal(userId, 'playlists', playlists);
+        return playlists;
+      }
+    } catch (e) {
+      console.warn('[dbService] Fetching playlists from backend failed, loading local fallback:', e);
     }
+    return await getUserLocal<Playlist[]>(userId, 'playlists', []);
   },
 
   async createPlaylist(userId: string, name: string, coverImage?: string): Promise<Playlist> {
-    const res = await fetch(`${BACKEND_URL}/api/user/playlists`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        userId,
+    let newPlaylist: Playlist | null = null;
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/user/playlists`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          name,
+          description: 'Mobile App Playlist',
+          coverUrl: coverImage || null
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        newPlaylist = {
+          id: String(data.id),
+          user_id: userId,
+          name: data.name,
+          cover_image: data.cover_url || coverImage || null,
+          created_at: new Date().toISOString(),
+          songs: []
+        };
+      }
+    } catch (e) {
+      console.warn('[dbService] Remote playlist creation failed, creating locally:', e);
+    }
+
+    if (!newPlaylist) {
+      newPlaylist = {
+        id: `local_pl_${Date.now()}`,
+        user_id: userId,
         name,
-        description: 'Mobile App Playlist',
-        coverUrl: coverImage || null
-      })
-    });
-    if (!res.ok) throw new Error('Failed to create playlist');
-    const data = await res.json();
-    return {
-      id: data.id.toString(),
-      user_id: userId,
-      name: data.name,
-      cover_image: data.cover_url || coverImage || null,
-      created_at: new Date().toISOString(),
-      songs: []
-    };
+        cover_image: coverImage || null,
+        created_at: new Date().toISOString(),
+        songs: []
+      };
+    }
+
+    const localPlaylists = await getUserLocal<Playlist[]>(userId, 'playlists', []);
+    await saveUserLocal(userId, 'playlists', [newPlaylist, ...localPlaylists]);
+    return newPlaylist;
   },
 
   async deletePlaylist(userId: string, playlistId: string): Promise<void> {
-    const res = await fetch(`${BACKEND_URL}/api/user/playlists/${playlistId}`, {
-      method: 'DELETE'
-    });
-    if (!res.ok) throw new Error('Failed to delete playlist');
+    try {
+      await fetch(`${BACKEND_URL}/api/user/playlists/${playlistId}`, {
+        method: 'DELETE'
+      });
+    } catch (e) {
+      console.warn('[dbService] Remote playlist deletion failed:', e);
+    }
+
+    let localPlaylists = await getUserLocal<Playlist[]>(userId, 'playlists', []);
+    localPlaylists = localPlaylists.filter(p => String(p.id) !== String(playlistId));
+    await saveUserLocal(userId, 'playlists', localPlaylists);
   },
 
   // ==========================================
@@ -385,7 +419,7 @@ export const dbService = {
   // ==========================================
   async getSongsInPlaylist(userId: string, playlistId: string): Promise<Song[]> {
     const playlists = await this.getPlaylists(userId);
-    const playlist = playlists.find(p => p.id === playlistId);
+    const playlist = playlists.find(p => String(p.id) === String(playlistId));
     return playlist?.songs || [];
   },
 
@@ -393,29 +427,95 @@ export const dbService = {
     const videoId = getYoutubeVideoId('', songId);
     const allSongs = await this.getSongs();
     const song = allSongs.find(s => s.id === songId);
-    
-    const res = await fetch(`${BACKEND_URL}/api/user/playlists/songs`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        playlistId,
-        songVideoId: videoId,
-        title: song?.title || 'Track',
-        artist: song?.artist || 'Unknown Artist',
-        coverUrl: getSongCoverUrl(song),
-        duration: '03:00',
-        durationSeconds: 180
-      })
+    const newSongObj: Song = song || {
+      id: songId,
+      title: 'Track',
+      artist: 'Unknown Artist',
+      youtube_url: `https://www.youtube.com/watch?v=${videoId}`,
+      coverUrl: 'https://images.unsplash.com/photo-1614149162883-504ce4d13909?w=300',
+      durationSeconds: 180
+    };
+
+    try {
+      await fetch(`${BACKEND_URL}/api/user/playlists/songs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          playlistId,
+          songVideoId: videoId,
+          title: newSongObj.title,
+          artist: newSongObj.artist,
+          coverUrl: getSongCoverUrl(newSongObj),
+          duration: '03:00',
+          durationSeconds: 180
+        })
+      });
+    } catch (e) {
+      console.warn('[dbService] Remote add song to playlist failed:', e);
+    }
+
+    // Update local cached playlist
+    let localPlaylists = await getUserLocal<Playlist[]>(userId, 'playlists', []);
+    localPlaylists = localPlaylists.map(p => {
+      if (String(p.id) === String(playlistId)) {
+        const currentSongs = p.songs || [];
+        const exists = currentSongs.some(s => s.id === songId);
+        if (!exists) {
+          return { ...p, songs: [...currentSongs, newSongObj] };
+        }
+      }
+      return p;
     });
-    if (!res.ok) throw new Error('Failed to add song to playlist');
+    await saveUserLocal(userId, 'playlists', localPlaylists);
   },
 
   async removeSongFromPlaylist(userId: string, playlistId: string, songId: string): Promise<void> {
-    const videoId = getYoutubeVideoId('', songId);
-    const res = await fetch(`${BACKEND_URL}/api/user/playlists/songs?playlistId=${playlistId}&songVideoId=${videoId}`, {
-      method: 'DELETE'
-    });
-    if (!res.ok) throw new Error('Failed to remove song from playlist');
+    let videoId = getYoutubeVideoId('', songId);
+
+    // Try to extract exact videoId or song id from current playlist songs
+    try {
+      const playlists = await this.getPlaylists(userId);
+      const playlist = playlists.find(p => String(p.id) === String(playlistId));
+      const targetSong = playlist?.songs?.find(s => String(s.id) === String(songId) || (s as any).videoId === songId);
+      if (targetSong) {
+        if ((targetSong as any).videoId) {
+          videoId = (targetSong as any).videoId;
+        } else if (targetSong.youtube_url) {
+          videoId = getYoutubeVideoId(targetSong.youtube_url, targetSong.id);
+        }
+      }
+    } catch (e) {
+      console.warn('[dbService] Lookup target song error:', e);
+    }
+
+    // Call backend endpoint with query params
+    try {
+      const deleteUrl = `${BACKEND_URL}/api/user/playlists/songs?playlistId=${encodeURIComponent(playlistId)}&songVideoId=${encodeURIComponent(videoId)}&songId=${encodeURIComponent(songId)}`;
+      await fetch(deleteUrl, { method: 'DELETE' });
+    } catch (e) {
+      console.warn('[dbService] Backend delete playlist song request failed:', e);
+    }
+
+    // Update local storage cache
+    try {
+      let localPlaylists = await getUserLocal<Playlist[]>(userId, 'playlists', []);
+      localPlaylists = localPlaylists.map(p => {
+        if (String(p.id) === String(playlistId)) {
+          return {
+            ...p,
+            songs: (p.songs || []).filter(s =>
+              String(s.id) !== String(songId) &&
+              (s as any).videoId !== videoId &&
+              (s as any).videoId !== songId
+            )
+          };
+        }
+        return p;
+      });
+      await saveUserLocal(userId, 'playlists', localPlaylists);
+    } catch (e) {
+      console.warn('[dbService] Local playlist removal update error:', e);
+    }
   },
 
   // ==========================================
@@ -580,6 +680,9 @@ export const dbService = {
   // DOWNLOADS (Local AsyncStorage cache)
   // ==========================================
   async getDownloads(userId: string): Promise<Song[]> {
+    const offlineSongs = await downloadService.getDownloadedSongs(userId);
+    if (offlineSongs.length > 0) return offlineSongs;
+
     const downloads = await getUserLocal<Download[]>(userId, 'downloads', []);
     const songIds = downloads.map(d => d.song_id);
     const allSongs = await this.getSongs();
@@ -587,6 +690,8 @@ export const dbService = {
   },
 
   async isDownloaded(userId: string, songId: string): Promise<boolean> {
+    const isOffline = await downloadService.isDownloaded(userId, songId);
+    if (isOffline) return true;
     const downloads = await getUserLocal<Download[]>(userId, 'downloads', []);
     return downloads.some(d => d.song_id === songId);
   },
@@ -594,19 +699,22 @@ export const dbService = {
   async toggleDownload(userId: string, songId: string): Promise<boolean> {
     const isDown = await this.isDownloaded(userId, songId);
     if (isDown) {
+      await downloadService.removeDownloadedSong(userId, songId);
       let downloads = await getUserLocal<Download[]>(userId, 'downloads', []);
       downloads = downloads.filter(d => d.song_id !== songId);
       await saveUserLocal(userId, 'downloads', downloads);
       return false;
     } else {
-      const downloads = await getUserLocal<Download[]>(userId, 'downloads', []);
-      downloads.push({
-        id: Math.random().toString(36).substr(2, 9),
-        user_id: userId,
-        song_id: songId,
-        downloaded_at: new Date().toISOString()
-      });
-      await saveUserLocal(userId, 'downloads', downloads);
+      const allSongs = await this.getSongs();
+      const song = allSongs.find(s => s.id === songId) || {
+        id: songId,
+        title: 'Track',
+        artist: 'Unknown Artist',
+        youtube_url: `https://www.youtube.com/watch?v=${getYoutubeVideoId('', songId)}`,
+        coverUrl: 'https://images.unsplash.com/photo-1614149162883-504ce4d13909?w=300',
+        durationSeconds: 180
+      };
+      await downloadService.downloadSong(song, userId);
       return true;
     }
   },
